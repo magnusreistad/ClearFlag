@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-lint-test:
+    name: Backend Lint & Test
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install ruff pytest
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Run tests
+        run: |
+          if [ -d tests ]; then pytest; else echo "No tests directory yet — skipping."; fi
+
+  # Frontend job placeholder — uncomment and fill in once the React app
+  # is scaffolded in Sprint 3. Keeping this commented out avoids a
+  # failing/red CI badge for a frontend that doesn't exist yet.
+  #
+  # frontend-lint-test:
+  #   name: Frontend Lint & Test
+  #   runs-on: ubuntu-latest
+  #   defaults:
+  #     run:
+  #       working-directory: ./frontend
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: "20"
+  #     - run: npm ci
+  #     - run: npm run lint
+  #     - run: npm test -- --watchAll=false
