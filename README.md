@@ -23,7 +23,8 @@ clearflag/
 │   │   ├── script.py.mako       # Template for new migration files
 │   │   └── versions/            # Migration scripts
 │   ├── scripts/
-│   │   └── smoke_test_db.py     # Manual insert/read-back check against the DB
+│   │   ├── smoke_test_db.py     # Manual insert/read-back check against the DB
+│   │   └── seed_transactions.py # Generates synthetic transaction data w/ planted fraud
 │   ├── tests/
 │   │   └── test_health.py
 │   ├── .env                     # not committed — see Local development
@@ -105,6 +106,21 @@ python -m scripts.smoke_test_db
 ```
 
 This inserts a seeded user and transaction, reads them back, confirms types round-trip correctly (notably that `amount` deserializes as `Decimal`, not `float`), and cleans up after itself.
+
+## Synthetic transaction dataset
+
+`scripts/seed_transactions.py` generates ~95 days of realistic transaction history for the single seeded user, with a handful of deliberately planted fraud scenarios mixed in (velocity, geographic anomaly, amount deviation, new-merchant risk, and one multi-rule case) for the Sprint 2 rules engine to eventually detect. Each planted row is called out in a code comment explaining why it's there.
+
+Run it with:
+
+```bash
+cd backend
+python -m scripts.seed_transactions
+```
+
+It prompts you to confirm the target database host before touching any data — always confirm it's the **dev** Neon branch, never production. Pass `--yes` to skip the prompt (e.g. scripting/automation).
+
+The script is idempotent: it clears the seeded user's existing transactions before regenerating, and uses a fixed random seed, so re-running it locally produces the same dataset shape instead of piling up duplicates.
 
 ## Schema overview
 
