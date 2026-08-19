@@ -32,7 +32,18 @@ clearflag/
 │   ├── conftest.py              # Empty on purpose — see explanation within .py file
 │   ├── requirements-dev.txt
 │   └── requirements.txt
-├── frontend/                   # React app (added in Sprint 3)
+├── frontend/
+│   ├── src/
+│   │   ├── api/                 # Fetch wrapper + typed GET /transactions client
+│   │   ├── components/
+│   │   │   └── TransactionFeed/ # Fetches & renders the transaction list (SCRUM-60)
+│   │   ├── lib/                 # Currency/date/category formatting helpers
+│   │   ├── types/                # Shared TS types mirroring backend/app/schemas.py
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   ├── .env.example              # VITE_API_BASE_URL, VITE_SEEDED_USER_ID
+│   ├── package.json
+│   └── vite.config.ts
 ├── .gitignore
 └── README.md
 ```
@@ -40,6 +51,12 @@ clearflag/
 ## Status
 
 🚧 In active development — see the [Confluence project space](#) for the full PRD, sprint plan, and decision log.
+
+Done so far:
+- Backend: `users`/`transactions` schema, synthetic 95-day dataset with planted fraud scenarios (SCRUM-12), paginated `GET /transactions` endpoint (SCRUM-13).
+- Frontend: React app scaffolded (Vite + TypeScript + CSS Modules); transaction feed component renders merchant, amount, category, location, and date for the seeded user, with day grouping, pagination, and loading/empty/error states (SCRUM-60).
+
+Not yet built: fraud-flag badges, rationale cards, the rules engine, and auth (auth is explicitly out of scope for this project — see `backend/app/models.py`).
 
 ## Local development (backend)
 
@@ -56,6 +73,33 @@ uvicorn app.main:app --reload
 ```
 
 Visit `http://localhost:8000/health` to confirm the API is running.
+
+## Local development (frontend)
+
+```bash
+cd frontend
+npm install
+
+# Create .env (copy .env.example) — VITE_SEEDED_USER_ID must match the
+# seeded user's actual id in your target DB, not just any number
+npm run dev
+```
+
+Visit `http://localhost:5173`. The backend must also be running (see above) — the dev server's origin is allow-listed in `backend/app/main.py`'s CORS config.
+
+Run the test suite with `npm test`.
+
+## API endpoints
+
+`GET /transactions` — paginated list of a user's transactions, sorted newest-first.
+
+| Query param | Required | Notes |
+|---|---|---|
+| `user_id` | yes | No auth yet, so the caller must pass this explicitly — see `backend/app/models.py` for why. |
+| `limit` | no | Default 50, max 200. |
+| `offset` | no | Default 0. |
+
+Returns `{ items, total, limit, offset }`, where each item is `id, user_id, timestamp, merchant, category, amount, latitude, longitude, location_label` (see `backend/app/schemas.py`). `amount` is serialized as a string, not a number, to preserve `Decimal` precision.
 
 ## Environment variables
 
