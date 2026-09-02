@@ -46,3 +46,9 @@ Thumbs.db
 # --- Logs ---
 *.log
 logs/
+
+# --- Claude Code local config (not shared via git) ---
+.claude/
+
+# --- CLAUDE.md informational file for Claude Code (not shared via git) ---
+CLAUDE.md
