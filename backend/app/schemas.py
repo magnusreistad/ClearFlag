@@ -16,6 +16,8 @@ class TransactionOut(BaseModel):
     latitude: float
     longitude: float
     location_label: str
+    is_flagged: bool
+    rationale: str | None
 
 
 class TransactionListResponse(BaseModel):

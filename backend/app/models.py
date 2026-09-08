@@ -1,7 +1,15 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -52,3 +60,32 @@ class Transaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="transactions")
+    flags: Mapped[list["TransactionFlag"]] = relationship(
+        back_populates="transaction", cascade="all, delete-orphan"
+    )
+
+
+class TransactionFlag(Base):
+    """One row per rule hit (SCRUM-61). Rules aren't incremental -- each one
+    needs a user's full transaction history to evaluate correctly -- so
+    these rows are wholesale recomputed (deleted and reinserted) every time
+    the rules engine runs for a user, rather than updated in place. See
+    app/routers/transactions.py.
+    """
+
+    __tablename__ = "transaction_flags"
+    __table_args__ = (
+        Index("ix_transaction_flags_transaction_id", "transaction_id"),
+        # Safety net against the delete-then-reinsert refresh (see
+        # app/routers/transactions.py) double-counting a rule hit if it's
+        # ever interrupted partway or a future code path skips the delete.
+        UniqueConstraint("transaction_id", "rule_name", name="uq_transaction_flags_transaction_rule"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), nullable=False)
+    rule_name: Mapped[str] = mapped_column(String, nullable=False)
+    rationale: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    transaction: Mapped["Transaction"] = relationship(back_populates="flags")
