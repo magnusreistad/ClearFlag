@@ -22,6 +22,8 @@ function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
     latitude: 47.6062,
     longitude: -122.3321,
     location_label: 'Seattle, WA',
+    is_flagged: false,
+    rationale: null,
     ...overrides,
   }
 }

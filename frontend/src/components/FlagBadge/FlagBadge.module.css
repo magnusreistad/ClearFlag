@@ -1,0 +1,75 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid #f2dfb8;
+  border-radius: 10px;
+  background: #fdf2e3;
+  color: #b5730c;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.badge:hover {
+  background: #fbe8cc;
+}
+
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #b5730c;
+}
+
+.panel {
+  position: fixed;
+  z-index: 1000;
+  width: 280px;
+  max-width: calc(100vw - 40px);
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 1px solid #eff0f6;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(20, 20, 43, 0.12);
+}
+
+.singleReason {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #1a1a2e;
+}
+
+.reasonList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reasonItem {
+  position: relative;
+  padding-left: 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #1a1a2e;
+}
+
+.reasonItem::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #b5730c;
+}

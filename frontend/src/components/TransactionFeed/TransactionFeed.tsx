@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { fetchTransactions } from '../../api/transactions'
 import type { Transaction } from '../../types/transaction'
 import { dateKey, formatCategory, formatCurrency, formatGroupHeading, formatTime } from '../../lib/format'
+import { FlagBadge } from '../FlagBadge/FlagBadge'
 import styles from './TransactionFeed.module.css'
 
 const PAGE_SIZE = 50
@@ -40,6 +41,8 @@ export function TransactionFeed() {
   const [status, setStatus] = useState<Status>('loading')
   const [error, setError] = useState<string | null>(null)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
+  // At most one flag panel open at a time, across the whole feed.
+  const [openFlagId, setOpenFlagId] = useState<number | null>(null)
 
   const loadPage = useCallback(async (offset: number) => {
     const response = await fetchTransactions({ limit: PAGE_SIZE, offset })
@@ -131,7 +134,16 @@ export function TransactionFeed() {
                   {transaction.merchant.charAt(0)}
                 </div>
                 <div className={styles.details}>
-                  <span className={styles.merchant}>{transaction.merchant}</span>
+                  <span className={styles.merchantLine}>
+                    <span className={styles.merchant}>{transaction.merchant}</span>
+                    {transaction.is_flagged && transaction.rationale && (
+                      <FlagBadge
+                        rationale={transaction.rationale}
+                        isOpen={openFlagId === transaction.id}
+                        onOpenChange={(open) => setOpenFlagId(open ? transaction.id : null)}
+                      />
+                    )}
+                  </span>
                   <span className={styles.meta}>
                     {formatCategory(transaction.category)} · {transaction.location_label}
                   </span>

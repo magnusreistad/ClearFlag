@@ -9,6 +9,8 @@ export interface Transaction {
   latitude: number
   longitude: number
   location_label: string
+  is_flagged: boolean
+  rationale: string | null
 }
 
 export interface TransactionListResponse {
