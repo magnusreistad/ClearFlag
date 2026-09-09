@@ -1,3 +1,5 @@
+import threading
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,15 @@ from app.rules.engine import concatenate_rationales, evaluate_all_rules
 from app.schemas import TransactionListResponse, TransactionOut
 
 router = APIRouter()
+
+# Serializes _refresh_flags so two concurrent requests (e.g. React
+# StrictMode double-firing the mount effect in dev, or overlapping browser
+# tabs) can't race between the delete and reinsert below and violate the
+# (transaction_id, rule_name) unique constraint. FastAPI runs sync
+# endpoints in a threadpool, so concurrent requests genuinely run on
+# separate threads. A single process-wide lock (rather than per-user) is
+# fine at this project's scale.
+_flags_refresh_lock = threading.Lock()
 
 
 def _refresh_flags(db: Session, user_id: int) -> dict[int, str]:
@@ -21,20 +32,21 @@ def _refresh_flags(db: Session, user_id: int) -> dict[int, str]:
     at this project's synthetic-data scale -- a real system would move this
     to a background job instead of a request-time recompute.
     """
-    all_transactions = db.query(Transaction).filter(Transaction.user_id == user_id).all()
-    hits = evaluate_all_rules(all_transactions)
+    with _flags_refresh_lock:
+        all_transactions = db.query(Transaction).filter(Transaction.user_id == user_id).all()
+        hits = evaluate_all_rules(all_transactions)
 
-    transaction_ids = [t.id for t in all_transactions]
-    db.query(TransactionFlag).filter(TransactionFlag.transaction_id.in_(transaction_ids)).delete(
-        synchronize_session=False
-    )
-    db.add_all(
-        TransactionFlag(transaction_id=hit.transaction_id, rule_name=hit.rule_name, rationale=hit.rationale)
-        for hit in hits
-    )
-    db.commit()
+        transaction_ids = [t.id for t in all_transactions]
+        db.query(TransactionFlag).filter(TransactionFlag.transaction_id.in_(transaction_ids)).delete(
+            synchronize_session=False
+        )
+        db.add_all(
+            TransactionFlag(transaction_id=hit.transaction_id, rule_name=hit.rule_name, rationale=hit.rationale)
+            for hit in hits
+        )
+        db.commit()
 
-    return concatenate_rationales(hits)
+        return concatenate_rationales(hits)
 
 
 def _to_transaction_out(t: Transaction, rationale_by_id: dict[int, str]) -> TransactionOut:

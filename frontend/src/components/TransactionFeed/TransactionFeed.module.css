@@ -83,7 +83,16 @@
   flex: 1;
 }
 
+.merchantLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .merchant {
+  min-width: 0;
+  flex: 1 1 auto;
   font-size: 15px;
   font-weight: 600;
   color: #14142b;
