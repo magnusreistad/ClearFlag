@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -263,3 +264,51 @@ def test_stale_flags_are_cleared_when_no_longer_triggered():
     flags = db.query(TransactionFlag).filter(TransactionFlag.transaction_id == outlier_id).all()
     db.close()
     assert flags == []
+
+
+def test_concurrent_requests_dont_race_on_flag_refresh():
+    """Regression test: React StrictMode double-fires the mount effect in
+    dev, sending two near-simultaneous GET /transactions requests. Both used
+    to run _refresh_flags's delete-then-reinsert concurrently, occasionally
+    tripping the (transaction_id, rule_name) unique constraint with a 500.
+    """
+    db = TestingSessionLocal()
+    user = User(name="Concurrent Refresh User")
+    db.add(user)
+    db.flush()
+    history = [
+        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00")) for i in range(5)
+    ]
+    outlier = make_transaction(user.id, days_ago=0, amount=Decimal("500.00"))
+    db.add_all([*history, outlier])
+    db.commit()
+    user_id = user.id
+    outlier_id = outlier.id
+    db.close()
+
+    responses: list[object] = [None, None]
+
+    def fetch(index: int) -> None:
+        responses[index] = client.get("/transactions", params={"user_id": user_id})
+
+    threads = [threading.Thread(target=fetch, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    for response in responses:
+        assert response.status_code == 200
+        items_by_id = {item["id"]: item for item in response.json()["items"]}
+        assert items_by_id[outlier_id]["is_flagged"] is True
+
+    flags = db_query_flags_for(outlier_id)
+    assert len(flags) == 1
+
+
+def db_query_flags_for(transaction_id: int) -> list[TransactionFlag]:
+    db = TestingSessionLocal()
+    try:
+        return db.query(TransactionFlag).filter(TransactionFlag.transaction_id == transaction_id).all()
+    finally:
+        db.close()
