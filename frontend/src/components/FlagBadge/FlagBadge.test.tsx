@@ -10,6 +10,11 @@ const MULTI_RULE_RATIONALE =
   'Flagged: this amount is 1162% higher than your typical spend in this category. ' +
   'Flagged: this is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase.'
 
+const THREE_RULE_RATIONALE =
+  'Flagged: this amount is 1162% higher than your typical spend in this category. ' +
+  'Flagged: this is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase. ' +
+  'Flagged: three purchases from this merchant occurred within the last hour.'
+
 function ControlledFlagBadge({ rationale }: { rationale: string }) {
   const [isOpen, setIsOpen] = useState(false)
   return <FlagBadge rationale={rationale} isOpen={isOpen} onOpenChange={setIsOpen} />
@@ -48,6 +53,23 @@ describe('FlagBadge', () => {
 
     rerender(<ControlledFlagBadge rationale={MULTI_RULE_RATIONALE} />)
     expect(container.querySelector('[data-rule-count]')).toHaveAttribute('data-rule-count', '2')
+
+    rerender(<ControlledFlagBadge rationale={THREE_RULE_RATIONALE} />)
+    expect(container.querySelector('[data-rule-count]')).toHaveAttribute('data-rule-count', '3')
+  })
+
+  // The severity treatment (SCRUM-26) is pure CSS keyed off data-rule-count
+  // (see FlagBadge.module.css), so the seam worth testing at this level is
+  // that the attribute lands with the right value at each tier boundary -
+  // rendered style output isn't something these component tests assert on.
+  it('advances past the single-rule tier for any rule count above one', () => {
+    const { container, rerender } = render(<ControlledFlagBadge rationale={MULTI_RULE_RATIONALE} />)
+    const badge = container.querySelector('[data-rule-count]')
+    expect(badge).not.toHaveAttribute('data-rule-count', '1')
+
+    rerender(<ControlledFlagBadge rationale={THREE_RULE_RATIONALE} />)
+    expect(badge).not.toHaveAttribute('data-rule-count', '1')
+    expect(badge).not.toHaveAttribute('data-rule-count', '2')
   })
 
   it('toggles the panel closed when the badge is clicked again', async () => {

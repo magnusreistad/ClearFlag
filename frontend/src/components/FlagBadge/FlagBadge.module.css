@@ -27,6 +27,41 @@
   background: #b5730c;
 }
 
+/* Severity progression: more rules on a flag reads as more severe, so
+   multi-rule badges step up in saturation/weight from the single-rule
+   baseline above rather than introducing a separate color system. */
+.badge:not([data-rule-count='1']) {
+  border-color: #e8c48a;
+  background: #fae4bf;
+  color: #9c5f0a;
+  font-weight: 700;
+}
+
+.badge:not([data-rule-count='1']):hover {
+  background: #f7d9a3;
+}
+
+.badge:not([data-rule-count='1']) .dot {
+  background: #9c5f0a;
+}
+
+.badge:not([data-rule-count='1']):not([data-rule-count='2']) {
+  border-width: 1.5px;
+  border-color: #d9a94a;
+  background: #f7d9a3;
+  color: #7a4808;
+}
+
+.badge:not([data-rule-count='1']):not([data-rule-count='2']):hover {
+  background: #f3cb85;
+}
+
+.badge:not([data-rule-count='1']):not([data-rule-count='2']) .dot {
+  width: 6px;
+  height: 6px;
+  background: #7a4808;
+}
+
 .panel {
   position: fixed;
   z-index: 1000;
