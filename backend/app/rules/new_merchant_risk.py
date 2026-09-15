@@ -81,7 +81,7 @@ def evaluate_new_merchant_risk(
                 RuleHit(
                     transaction_id=t.id,
                     rationale=(
-                        f"Flagged: this is your first purchase from this merchant, "
+                        f"Flagged: This is your first purchase from this merchant, "
                         f"and the amount is {pct_higher:.0f}% higher than your "
                         f"typical first-time purchase."
                     ),

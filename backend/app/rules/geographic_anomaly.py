@@ -105,7 +105,7 @@ def evaluate_geographic_anomaly(
                 RuleHit(
                     transaction_id=t.id,
                     rationale=(
-                        f"Flagged: this transaction occurred in {t.location_label}, "
+                        f"Flagged: This transaction occurred in {t.location_label}, "
                         f"far from where you usually shop."
                     ),
                 )

@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.database import DATABASE_URL, SessionLocal
-from app.models import Transaction, User
+from app.models import Transaction, TransactionFlag, User
 
 SEED = 42
 DAYS_OF_HISTORY = 95  # comfortably over the 90-day acceptance criterion
@@ -289,6 +289,30 @@ def generate_multi_rule_fraud(user_id: int, start_date: datetime) -> list[tuple[
     return [(tx, "multi-rule: new merchant AND amount deviation in the same transaction")]
 
 
+def generate_triple_rule_fraud(user_id: int, start_date: datetime) -> list[tuple[Transaction, str]]:
+    """A single transaction that trips three rules at once (SCRUM-65): new
+    merchant, amount deviation, AND geographic anomaly -- the classic
+    "compromised card used internationally" pattern, which happens to be a
+    natural three-signal case since a first-time overseas purchase is
+    realistically also a large one. Placed on the last planted day (94, after
+    every other plant including the two-rule Aurora Fine Jewelers case on day
+    66) so it can't shift the historical baseline any earlier plant is
+    compared against.
+
+    Reuses Manila -- the one FAR_LOCATIONS entry the geographic-anomaly
+    plants above don't already use -- rather than introducing a new city.
+    """
+    day = start_date + timedelta(days=94)
+    category = "shopping"
+    merchant = "Meridian Duty-Free Traders"
+    amount = Decimal("3200.00")  # first-ever merchant, ~55x category mean
+    far = FAR_LOCATIONS[3]
+    assert far["label"] == "Manila, Philippines"
+    location = (far["lat"], far["lon"], far["label"])
+    tx = make_transaction(user_id, random_timestamp(day), merchant, category, amount, location)
+    return [(tx, "triple-rule: new merchant AND amount deviation AND geographic anomaly in the same transaction")]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--yes", action="store_true", help="skip the dev-database confirmation prompt")
@@ -300,6 +324,16 @@ def main() -> None:
     db = SessionLocal()
     try:
         user = get_or_create_seed_user(db)
+        # TransactionFlag.transaction_id has no ON DELETE CASCADE at the DB
+        # level -- Transaction.flags' cascade="all, delete-orphan" is
+        # ORM-side only, and doesn't apply to this bulk Query.delete(). Once
+        # any flags have been persisted for this user (via the rules-refresh
+        # endpoint), deleting transactions first would violate that FK.
+        db.query(TransactionFlag).filter(
+            TransactionFlag.transaction_id.in_(
+                db.query(Transaction.id).filter(Transaction.user_id == user.id)
+            )
+        ).delete(synchronize_session=False)
         deleted = db.query(Transaction).filter(Transaction.user_id == user.id).delete(synchronize_session=False)
 
         start_date = datetime.now(timezone.utc).replace(
@@ -314,6 +348,7 @@ def main() -> None:
             ("amount deviation", generate_amount_deviation_fraud(user.id, start_date)),
             ("new merchant", generate_new_merchant_fraud(user.id, start_date)),
             ("multi-rule", generate_multi_rule_fraud(user.id, start_date)),
+            ("triple-rule", generate_triple_rule_fraud(user.id, start_date)),
         ]
 
         db.add_all(baseline)

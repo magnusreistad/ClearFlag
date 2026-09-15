@@ -53,7 +53,7 @@ def evaluate_velocity(
         RuleHit(
             transaction_id=t.id,
             rationale=(
-                f"Flagged: you made {best_count_by_id[t.id]} transactions "
+                f"Flagged: You made {best_count_by_id[t.id]} transactions "
                 f"in {window_minutes} minutes, which is unusual for your "
                 f"account."
             ),

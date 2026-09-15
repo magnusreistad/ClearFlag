@@ -82,7 +82,7 @@ def evaluate_amount_deviation(
                     RuleHit(
                         transaction_id=t.id,
                         rationale=(
-                            f"Flagged: this amount is {pct_higher:.0f}% higher "
+                            f"Flagged: This amount is {pct_higher:.0f}% higher "
                             f"than your typical spend in this category."
                         ),
                     )
