@@ -4,18 +4,18 @@ import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 import { FlagBadge } from './FlagBadge'
 
-const SINGLE_RULE_RATIONALE = 'Flagged: this amount is 200% higher than your typical spend in this category.'
+const SINGLE_RULE_RATIONALE = 'Flagged: This amount is 200% higher than your typical spend in this category.'
 const SINGLE_RULE_NAMES = ['amount_deviation']
 
 const MULTI_RULE_RATIONALE =
-  'Flagged: this amount is 1162% higher than your typical spend in this category. ' +
-  'Flagged: this is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase.'
+  'Flagged: This amount is 1162% higher than your typical spend in this category. ' +
+  'Flagged: This is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase.'
 const MULTI_RULE_NAMES = ['amount_deviation', 'new_merchant_risk']
 
 const THREE_RULE_RATIONALE =
-  'Flagged: this amount is 1162% higher than your typical spend in this category. ' +
-  'Flagged: this is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase. ' +
-  'Flagged: three purchases from this merchant occurred within the last hour.'
+  'Flagged: This amount is 1162% higher than your typical spend in this category. ' +
+  'Flagged: This is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase. ' +
+  'Flagged: Three purchases from this merchant occurred within the last hour.'
 const THREE_RULE_NAMES = ['amount_deviation', 'new_merchant_risk', 'velocity']
 
 function ControlledFlagBadge({ rationale, ruleNames }: { rationale: string; ruleNames: string[] }) {
@@ -34,7 +34,7 @@ describe('FlagBadge', () => {
     render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} ruleNames={SINGLE_RULE_NAMES} />)
     await userEvent.click(screen.getByRole('button', { name: /flagged/i }))
 
-    expect(screen.getByText('this amount is 200% higher than your typical spend in this category.')).toBeInTheDocument()
+    expect(screen.getByText('This amount is 200% higher than your typical spend in this category.')).toBeInTheDocument()
     expect(screen.queryByRole('list')).not.toBeInTheDocument()
   })
 
@@ -44,9 +44,9 @@ describe('FlagBadge', () => {
 
     const items = screen.getAllByRole('listitem')
     expect(items).toHaveLength(2)
-    expect(items[0]).toHaveTextContent('this amount is 1162% higher than your typical spend in this category.')
+    expect(items[0]).toHaveTextContent('This amount is 1162% higher than your typical spend in this category.')
     expect(items[1]).toHaveTextContent(
-      "this is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase.",
+      "This is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase.",
     )
   })
 
