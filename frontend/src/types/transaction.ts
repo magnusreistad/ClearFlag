@@ -11,6 +11,7 @@ export interface Transaction {
   location_label: string
   is_flagged: boolean
   rationale: string | null
+  rule_names: string[]
 }
 
 export interface TransactionListResponse {

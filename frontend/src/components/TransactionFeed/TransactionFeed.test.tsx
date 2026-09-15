@@ -24,6 +24,7 @@ function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
     location_label: 'Seattle, WA',
     is_flagged: false,
     rationale: null,
+    rule_names: [],
     ...overrides,
   }
 }

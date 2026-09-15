@@ -53,3 +53,14 @@ def concatenate_rationales(hits: Sequence[FlagHit]) -> dict[int, str]:
         transaction_id: " ".join(rationales)
         for transaction_id, rationales in rationales_by_transaction.items()
     }
+
+
+def rule_names_by_transaction(hits: Sequence[FlagHit]) -> dict[int, list[str]]:
+    """Group hits by transaction_id into the list of rule_names that fired,
+    in the same RULES order as concatenate_rationales's sentence order.
+    Transactions with no hits are absent from the result.
+    """
+    names_by_transaction: dict[int, list[str]] = defaultdict(list)
+    for hit in hits:
+        names_by_transaction[hit.transaction_id].append(hit.rule_name)
+    return dict(names_by_transaction)

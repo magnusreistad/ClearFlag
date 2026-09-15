@@ -5,6 +5,7 @@ import styles from './FlagBadge.module.css'
 
 interface FlagBadgeProps {
   rationale: string
+  ruleNames: string[]
   isOpen: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -12,11 +13,13 @@ interface FlagBadgeProps {
 const PANEL_WIDTH = 280
 const VIEWPORT_MARGIN = 16
 
-// Rule count is derived by splitting `rationale` (see splitRationale) since
-// the API doesn't expose rule_name per hit today. Exposed here via
-// data-rule-count so SCRUM-26's severity treatment has a hook to key off of
-// without re-deriving it.
-export function FlagBadge({ rationale, isOpen, onOpenChange }: FlagBadgeProps) {
+// Rule count comes from `ruleNames` (one entry per hit, API-provided -
+// SCRUM-64) rather than from splitting `rationale`. The individual reason
+// text still comes from splitRationale since the API exposes one combined
+// rationale string, not per-rule text. Exposed here via data-rule-count so
+// SCRUM-26's severity treatment has a hook to key off of without re-deriving
+// it.
+export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBadgeProps) {
   const buttonRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   // The transaction list clips overflow for its rounded-card look, so the
@@ -25,7 +28,7 @@ export function FlagBadge({ rationale, isOpen, onOpenChange }: FlagBadgeProps) {
   // the list's `overflow: hidden` cuts it off.
   const [panelPosition, setPanelPosition] = useState<{ top: number; left: number } | null>(null)
   const reasons = useMemo(() => splitRationale(rationale), [rationale])
-  const ruleCount = reasons.length
+  const ruleCount = ruleNames.length
 
   useLayoutEffect(() => {
     if (!isOpen || !buttonRef.current) {

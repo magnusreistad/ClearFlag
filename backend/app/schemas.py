@@ -18,6 +18,7 @@ class TransactionOut(BaseModel):
     location_label: str
     is_flagged: bool
     rationale: str | None
+    rule_names: list[str]
 
 
 class TransactionListResponse(BaseModel):

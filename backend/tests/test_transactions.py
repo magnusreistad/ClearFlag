@@ -141,10 +141,12 @@ def test_flagged_transaction_surfaces_rationale_and_is_flagged():
 
     assert items_by_id[outlier_id]["is_flagged"] is True
     assert "higher than your typical spend" in items_by_id[outlier_id]["rationale"]
+    assert items_by_id[outlier_id]["rule_names"] == ["amount_deviation"]
     for item_id, item in items_by_id.items():
         if item_id != outlier_id:
             assert item["is_flagged"] is False
             assert item["rationale"] is None
+            assert item["rule_names"] == []
 
 
 def test_transaction_triggering_multiple_rules_concatenates_rationale():
@@ -184,6 +186,8 @@ def test_transaction_triggering_multiple_rules_concatenates_rationale():
     multi_hit_rationale = items_by_id[multi_hit_id]["rationale"]
     assert "transactions" in multi_hit_rationale and "in 10 minutes" in multi_hit_rationale
     assert "higher than your typical spend" in multi_hit_rationale
+    # RULES order (see engine.py), not hit-discovery order.
+    assert items_by_id[multi_hit_id]["rule_names"] == ["velocity", "amount_deviation"]
 
 
 def test_unflagged_transactions_have_null_rationale():
@@ -201,6 +205,7 @@ def test_unflagged_transactions_have_null_rationale():
 
     assert all(item["is_flagged"] is False for item in body["items"])
     assert all(item["rationale"] is None for item in body["items"])
+    assert all(item["rule_names"] == [] for item in body["items"])
 
 
 def test_flags_are_persisted_to_the_database():
@@ -259,6 +264,7 @@ def test_stale_flags_are_cleared_when_no_longer_triggered():
     second_items_by_id = {item["id"]: item for item in second_response.json()["items"]}
     assert second_items_by_id[outlier_id]["is_flagged"] is False
     assert second_items_by_id[outlier_id]["rationale"] is None
+    assert second_items_by_id[outlier_id]["rule_names"] == []
 
     db = TestingSessionLocal()
     flags = db.query(TransactionFlag).filter(TransactionFlag.transaction_id == outlier_id).all()

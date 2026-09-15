@@ -5,30 +5,33 @@ import { describe, expect, it } from 'vitest'
 import { FlagBadge } from './FlagBadge'
 
 const SINGLE_RULE_RATIONALE = 'Flagged: this amount is 200% higher than your typical spend in this category.'
+const SINGLE_RULE_NAMES = ['amount_deviation']
 
 const MULTI_RULE_RATIONALE =
   'Flagged: this amount is 1162% higher than your typical spend in this category. ' +
   'Flagged: this is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase.'
+const MULTI_RULE_NAMES = ['amount_deviation', 'new_merchant_risk']
 
 const THREE_RULE_RATIONALE =
   'Flagged: this amount is 1162% higher than your typical spend in this category. ' +
   'Flagged: this is your first purchase from this merchant, and the amount is 562% higher than your typical first-time purchase. ' +
   'Flagged: three purchases from this merchant occurred within the last hour.'
+const THREE_RULE_NAMES = ['amount_deviation', 'new_merchant_risk', 'velocity']
 
-function ControlledFlagBadge({ rationale }: { rationale: string }) {
+function ControlledFlagBadge({ rationale, ruleNames }: { rationale: string; ruleNames: string[] }) {
   const [isOpen, setIsOpen] = useState(false)
-  return <FlagBadge rationale={rationale} isOpen={isOpen} onOpenChange={setIsOpen} />
+  return <FlagBadge rationale={rationale} ruleNames={ruleNames} isOpen={isOpen} onOpenChange={setIsOpen} />
 }
 
 describe('FlagBadge', () => {
   it('renders a Flagged badge that is collapsed by default', () => {
-    render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} />)
+    render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} ruleNames={SINGLE_RULE_NAMES} />)
     expect(screen.getByRole('button', { name: /flagged/i })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('region')).not.toBeInTheDocument()
   })
 
   it('renders a single-rule rationale as one clean line, not a list', async () => {
-    render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} />)
+    render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} ruleNames={SINGLE_RULE_NAMES} />)
     await userEvent.click(screen.getByRole('button', { name: /flagged/i }))
 
     expect(screen.getByText('this amount is 200% higher than your typical spend in this category.')).toBeInTheDocument()
@@ -36,7 +39,7 @@ describe('FlagBadge', () => {
   })
 
   it('renders a multi-rule rationale as a list of distinct reasons', async () => {
-    render(<ControlledFlagBadge rationale={MULTI_RULE_RATIONALE} />)
+    render(<ControlledFlagBadge rationale={MULTI_RULE_RATIONALE} ruleNames={MULTI_RULE_NAMES} />)
     await userEvent.click(screen.getByRole('button', { name: /flagged/i }))
 
     const items = screen.getAllByRole('listitem')
@@ -47,14 +50,16 @@ describe('FlagBadge', () => {
     )
   })
 
-  it('exposes the rule count via data-rule-count', () => {
-    const { container, rerender } = render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} />)
+  it('exposes the rule count via data-rule-count, from ruleNames rather than the rationale text', () => {
+    const { container, rerender } = render(
+      <ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} ruleNames={SINGLE_RULE_NAMES} />,
+    )
     expect(container.querySelector('[data-rule-count]')).toHaveAttribute('data-rule-count', '1')
 
-    rerender(<ControlledFlagBadge rationale={MULTI_RULE_RATIONALE} />)
+    rerender(<ControlledFlagBadge rationale={MULTI_RULE_RATIONALE} ruleNames={MULTI_RULE_NAMES} />)
     expect(container.querySelector('[data-rule-count]')).toHaveAttribute('data-rule-count', '2')
 
-    rerender(<ControlledFlagBadge rationale={THREE_RULE_RATIONALE} />)
+    rerender(<ControlledFlagBadge rationale={THREE_RULE_RATIONALE} ruleNames={THREE_RULE_NAMES} />)
     expect(container.querySelector('[data-rule-count]')).toHaveAttribute('data-rule-count', '3')
   })
 
@@ -63,17 +68,19 @@ describe('FlagBadge', () => {
   // that the attribute lands with the right value at each tier boundary -
   // rendered style output isn't something these component tests assert on.
   it('advances past the single-rule tier for any rule count above one', () => {
-    const { container, rerender } = render(<ControlledFlagBadge rationale={MULTI_RULE_RATIONALE} />)
+    const { container, rerender } = render(
+      <ControlledFlagBadge rationale={MULTI_RULE_RATIONALE} ruleNames={MULTI_RULE_NAMES} />,
+    )
     const badge = container.querySelector('[data-rule-count]')
     expect(badge).not.toHaveAttribute('data-rule-count', '1')
 
-    rerender(<ControlledFlagBadge rationale={THREE_RULE_RATIONALE} />)
+    rerender(<ControlledFlagBadge rationale={THREE_RULE_RATIONALE} ruleNames={THREE_RULE_NAMES} />)
     expect(badge).not.toHaveAttribute('data-rule-count', '1')
     expect(badge).not.toHaveAttribute('data-rule-count', '2')
   })
 
   it('toggles the panel closed when the badge is clicked again', async () => {
-    render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} />)
+    render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} ruleNames={SINGLE_RULE_NAMES} />)
     const badge = screen.getByRole('button', { name: /flagged/i })
 
     await userEvent.click(badge)
@@ -84,7 +91,7 @@ describe('FlagBadge', () => {
   })
 
   it('closes when Escape is pressed', async () => {
-    render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} />)
+    render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} ruleNames={SINGLE_RULE_NAMES} />)
     await userEvent.click(screen.getByRole('button', { name: /flagged/i }))
     expect(screen.getByRole('region')).toBeInTheDocument()
 

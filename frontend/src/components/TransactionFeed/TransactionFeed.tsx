@@ -139,6 +139,7 @@ export function TransactionFeed() {
                     {transaction.is_flagged && transaction.rationale && (
                       <FlagBadge
                         rationale={transaction.rationale}
+                        ruleNames={transaction.rule_names}
                         isOpen={openFlagId === transaction.id}
                         onOpenChange={(open) => setOpenFlagId(open ? transaction.id : null)}
                       />

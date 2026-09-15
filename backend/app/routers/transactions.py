@@ -5,7 +5,11 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Transaction, TransactionFlag
-from app.rules.engine import concatenate_rationales, evaluate_all_rules
+from app.rules.engine import (
+    concatenate_rationales,
+    evaluate_all_rules,
+    rule_names_by_transaction,
+)
 from app.schemas import TransactionListResponse, TransactionOut
 
 router = APIRouter()
@@ -20,7 +24,7 @@ router = APIRouter()
 _flags_refresh_lock = threading.Lock()
 
 
-def _refresh_flags(db: Session, user_id: int) -> dict[int, str]:
+def _refresh_flags(db: Session, user_id: int) -> tuple[dict[int, str], dict[int, list[str]]]:
     """Re-run the rules engine over a user's full transaction history and
     replace their persisted flags with the fresh result.
 
@@ -46,10 +50,12 @@ def _refresh_flags(db: Session, user_id: int) -> dict[int, str]:
         )
         db.commit()
 
-        return concatenate_rationales(hits)
+        return concatenate_rationales(hits), rule_names_by_transaction(hits)
 
 
-def _to_transaction_out(t: Transaction, rationale_by_id: dict[int, str]) -> TransactionOut:
+def _to_transaction_out(
+    t: Transaction, rationale_by_id: dict[int, str], rule_names_by_id: dict[int, list[str]]
+) -> TransactionOut:
     rationale = rationale_by_id.get(t.id)
     return TransactionOut(
         id=t.id,
@@ -63,6 +69,7 @@ def _to_transaction_out(t: Transaction, rationale_by_id: dict[int, str]) -> Tran
         location_label=t.location_label,
         is_flagged=rationale is not None,
         rationale=rationale,
+        rule_names=rule_names_by_id.get(t.id, []),
     )
 
 
@@ -73,7 +80,7 @@ def list_transactions(
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> TransactionListResponse:
-    rationale_by_id = _refresh_flags(db, user_id)
+    rationale_by_id, rule_names_by_id = _refresh_flags(db, user_id)
 
     query = db.query(Transaction).filter(Transaction.user_id == user_id)
     total = query.count()
@@ -84,7 +91,7 @@ def list_transactions(
         .all()
     )
     return TransactionListResponse(
-        items=[_to_transaction_out(t, rationale_by_id) for t in transactions],
+        items=[_to_transaction_out(t, rationale_by_id, rule_names_by_id) for t in transactions],
         total=total,
         limit=limit,
         offset=offset,

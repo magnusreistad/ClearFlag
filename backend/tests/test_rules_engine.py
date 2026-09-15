@@ -8,7 +8,12 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import Transaction, User
-from app.rules.engine import FlagHit, concatenate_rationales, evaluate_all_rules
+from app.rules.engine import (
+    FlagHit,
+    concatenate_rationales,
+    evaluate_all_rules,
+    rule_names_by_transaction,
+)
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -145,3 +150,22 @@ def test_concatenate_rationales_merges_multi_rule_hits_by_transaction_id():
 
 def test_concatenate_rationales_empty_input_returns_empty_dict():
     assert concatenate_rationales([]) == {}
+
+
+def test_rule_names_by_transaction_groups_multi_rule_hits_by_transaction_id():
+    hits = [
+        FlagHit(transaction_id=1, rule_name="velocity", rationale="Flagged: velocity reason."),
+        FlagHit(transaction_id=1, rule_name="amount_deviation", rationale="Flagged: amount reason."),
+        FlagHit(transaction_id=2, rule_name="velocity", rationale="Flagged: velocity reason."),
+    ]
+
+    grouped = rule_names_by_transaction(hits)
+
+    assert grouped == {
+        1: ["velocity", "amount_deviation"],
+        2: ["velocity"],
+    }
+
+
+def test_rule_names_by_transaction_empty_input_returns_empty_dict():
+    assert rule_names_by_transaction([]) == {}
