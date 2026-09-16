@@ -12,11 +12,15 @@ interim formatter in app.rules.engine (concatenate_rationales) stays the
 afterward as the on-failure fallback path (SCRUM-56).
 """
 
+from datetime import timedelta
 from typing import Literal
 
 from langgraph.graph import END, StateGraph
 
+from app.database import SessionLocal
 from app.investigation_agent.state import InvestigationState
+from app.models import Transaction
+from app.rules.velocity import DEFAULT_WINDOW_MINUTES
 
 TOOL_NODE_NAMES = ("get_transaction_history", "get_merchant_risk_score", "get_geo_distance")
 
@@ -56,20 +60,48 @@ def route_to_tools(
 
 
 def get_transaction_history(state: InvestigationState) -> dict:
-    """Placeholder for SCRUM-48.
+    """SCRUM-48. Triggered by the velocity rule.
 
-    Real inputs (per SCRUM-48): user_id, window_minutes.
-    Real output: list of transactions (timestamp, amount, merchant) within
-    the window + a count. Triggered by the velocity rule.
+    Queries the same rolling window the velocity rule itself flags on --
+    DEFAULT_WINDOW_MINUTES ending at the flagged transaction's own timestamp
+    (see app.rules.velocity) -- so the evidence lines up with the count the
+    rule already computed. The window is inclusive of both endpoints,
+    matching velocity.py's `> window` (not `>=`) exclusion test, and
+    includes the flagged transaction itself since the rule's own count does.
+
+    Opens its own session via SessionLocal (module-level, so tests can
+    monkeypatch it) rather than taking a `db` parameter: this node isn't on
+    the FastAPI request path yet (that's SCRUM-53), so there's no
+    request-scoped session to inject.
     """
     transaction = state["transaction"]
+    user_id = transaction["user_id"]
+    window_end = transaction["timestamp"]
+    window_start = window_end - timedelta(minutes=DEFAULT_WINDOW_MINUTES)
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.timestamp >= window_start,
+                Transaction.timestamp <= window_end,
+            )
+            .order_by(Transaction.timestamp)
+            .all()
+        )
+    finally:
+        db.close()
+
+    transactions = [{"timestamp": row.timestamp, "amount": row.amount, "merchant": row.merchant} for row in rows]
+
     return {
         "evidence": {
             "get_transaction_history": {
-                "_placeholder": True,
-                "user_id": transaction["user_id"],
-                "transactions": [],
-                "count": 0,
+                "user_id": user_id,
+                "transactions": transactions,
+                "count": len(transactions),
             }
         }
     }

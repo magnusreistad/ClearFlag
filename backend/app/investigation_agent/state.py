@@ -1,4 +1,5 @@
 import operator
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, TypedDict
 
@@ -11,6 +12,7 @@ class TransactionData(TypedDict):
 
     id: int
     user_id: int
+    timestamp: datetime
     merchant: str
     category: str
     amount: Decimal
