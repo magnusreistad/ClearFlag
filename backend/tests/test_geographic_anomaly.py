@@ -144,7 +144,7 @@ def test_rationale_uses_location_label():
     hits = evaluate_geographic_anomaly([*history, candidate])
 
     assert hits[0].rationale == (
-        "Flagged: this transaction occurred in Portland, OR, far from where you usually shop."
+        "Flagged: This transaction occurred in Portland, OR, far from where you usually shop."
     )
 
 
