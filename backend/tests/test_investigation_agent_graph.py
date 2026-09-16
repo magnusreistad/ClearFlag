@@ -8,7 +8,11 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.investigation_agent import graph as graph_module
-from app.investigation_agent.graph import get_transaction_history, investigation_graph
+from app.investigation_agent.graph import (
+    get_merchant_risk_score,
+    get_transaction_history,
+    investigation_graph,
+)
 from app.investigation_agent.state import InvestigationState, TransactionData
 from app.models import Transaction, User
 from scripts.seed_transactions import generate_triple_rule_fraud
@@ -265,3 +269,102 @@ class TestGetTransactionHistory:
         evidence = result["evidence"]["get_transaction_history"]
         assert evidence["transactions"] == []
         assert evidence["count"] == 0
+
+
+class TestGetMerchantRiskScore:
+    """SCRUM-49: direct unit tests of the get_merchant_risk_score node
+    against a real (in-memory SQLite) DB session, independent of the
+    graph's routing -- the SCRUM-65 routing test above already covers that
+    this node gets reached for a new_merchant_risk flag.
+    """
+
+    def test_true_first_time_transaction_is_flagged_first_with_zero_prior_count(self):
+        """A user with real history at *other* merchants, but none yet at
+        this one -- proves the count is scoped by merchant, not just user.
+        """
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        db = TestingSessionLocal()
+        try:
+            user = User(name="Test User")
+            db.add(user)
+            db.flush()
+            other_merchant_history = _make_transaction(
+                user.id, anchor - timedelta(days=1), merchant="Corner Store", amount=Decimal("5.00")
+            )
+            anchor_transaction = _make_transaction(user.id, anchor, merchant="New Boutique", amount=Decimal("50.00"))
+            db.add_all([other_merchant_history, anchor_transaction])
+            db.commit()
+
+            state: InvestigationState = {
+                "transaction": _transaction_data(anchor_transaction, id_=anchor_transaction.id, user_id=user.id),
+                "rule_names": ["new_merchant_risk"],
+                "evidence": {},
+                "rationale": "",
+            }
+            result = get_merchant_risk_score(state)
+        finally:
+            db.close()
+
+        evidence = result["evidence"]["get_merchant_risk_score"]
+        assert evidence["is_first_transaction"] is True
+        assert evidence["prior_transaction_count"] == 0
+        assert evidence["risk_tier"] is None
+
+    def test_repeat_merchant_transaction_is_not_first_with_correct_prior_count(self):
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        db = TestingSessionLocal()
+        try:
+            user = User(name="Test User")
+            db.add(user)
+            db.flush()
+            first_purchase = _make_transaction(
+                user.id, anchor - timedelta(days=2), merchant="Regular Cafe", amount=Decimal("6.00")
+            )
+            second_purchase = _make_transaction(
+                user.id, anchor - timedelta(days=1), merchant="Regular Cafe", amount=Decimal("6.50")
+            )
+            anchor_transaction = _make_transaction(user.id, anchor, merchant="Regular Cafe", amount=Decimal("7.00"))
+            db.add_all([first_purchase, second_purchase, anchor_transaction])
+            db.commit()
+
+            state: InvestigationState = {
+                "transaction": _transaction_data(anchor_transaction, id_=anchor_transaction.id, user_id=user.id),
+                "rule_names": ["new_merchant_risk"],
+                "evidence": {},
+                "rationale": "",
+            }
+            result = get_merchant_risk_score(state)
+        finally:
+            db.close()
+
+        evidence = result["evidence"]["get_merchant_risk_score"]
+        assert evidence["is_first_transaction"] is False
+        assert evidence["prior_transaction_count"] == 2
+
+    def test_user_merchant_pair_with_no_history_at_all_is_treated_as_first(self):
+        """Mirrors get_transaction_history's empty-history test: a
+        synthetic state referencing a user/merchant pair with nothing
+        persisted for it at all still resolves cleanly rather than erroring.
+        """
+        state: InvestigationState = {
+            "transaction": {
+                "id": 12345,
+                "user_id": 999,
+                "timestamp": datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+                "merchant": "Nonexistent Merchant",
+                "category": "groceries",
+                "amount": Decimal("10.00"),
+                "latitude": 47.6062,
+                "longitude": -122.3321,
+                "location_label": "Seattle, WA",
+            },
+            "rule_names": ["new_merchant_risk"],
+            "evidence": {},
+            "rationale": "",
+        }
+        result = get_merchant_risk_score(state)
+
+        evidence = result["evidence"]["get_merchant_risk_score"]
+        assert evidence["is_first_transaction"] is True
+        assert evidence["prior_transaction_count"] == 0
+        assert evidence["risk_tier"] is None

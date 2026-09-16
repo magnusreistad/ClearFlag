@@ -108,21 +108,59 @@ def get_transaction_history(state: InvestigationState) -> dict:
 
 
 def get_merchant_risk_score(state: InvestigationState) -> dict:
-    """Placeholder for SCRUM-49.
+    """SCRUM-49. Triggered by the new_merchant_risk rule.
 
-    Real inputs (per SCRUM-49): user_id, merchant_id.
-    Real output: is_first_transaction, prior_transaction_count, risk_tier.
-    Triggered by the new_merchant_risk rule.
+    Keys merchant identity off the `merchant` name string, not a merchant_id:
+    there is no merchant_id column on Transaction and no merchants reference
+    table anywhere in this codebase (confirmed by investigation), and
+    app.rules.new_merchant_risk itself already keys "first transaction with
+    a merchant" off the same name-string equality (`t.merchant not in
+    seen_merchants`). Matching the rule's own identity notion is more
+    correct than inventing a stricter one it doesn't use. This does mean
+    two distinct real-world merchants sharing a display string would be
+    treated as one -- a pre-existing fragility of the rule this tool is
+    just reflecting, not a new one.
+
+    prior_transaction_count/is_first_transaction are relative to the
+    flagged transaction's own timestamp (strictly before it, not inclusive
+    -- unlike get_transaction_history's window, this isn't counting the
+    flagged transaction itself, just what came before it).
+
+    risk_tier is always None: there is no merchant reference/risk-classification
+    data source in this codebase to back it. The key stays present (rather
+    than the field being omitted) to match the evidence shape SCRUM-47
+    documented, with this comment standing in for that missing data source
+    rather than a fabricated scoring scheme.
+
+    Opens its own session via SessionLocal, same as get_transaction_history
+    (SCRUM-48) and for the same reason: not on the FastAPI request path yet.
     """
     transaction = state["transaction"]
+    user_id = transaction["user_id"]
+    merchant = transaction["merchant"]
+    anchor_timestamp = transaction["timestamp"]
+
+    db = SessionLocal()
+    try:
+        prior_transaction_count = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.merchant == merchant,
+                Transaction.timestamp < anchor_timestamp,
+            )
+            .count()
+        )
+    finally:
+        db.close()
+
     return {
         "evidence": {
             "get_merchant_risk_score": {
-                "_placeholder": True,
-                "user_id": transaction["user_id"],
-                "merchant": transaction["merchant"],
-                "is_first_transaction": None,
-                "prior_transaction_count": None,
+                "user_id": user_id,
+                "merchant": merchant,
+                "is_first_transaction": prior_transaction_count == 0,
+                "prior_transaction_count": prior_transaction_count,
                 "risk_tier": None,
             }
         }
