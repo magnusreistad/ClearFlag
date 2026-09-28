@@ -14,6 +14,7 @@ from app.investigation_agent.graph import (
     get_merchant_risk_score,
     get_transaction_history,
     investigation_graph,
+    plan_tool_calls,
 )
 from app.investigation_agent.state import InvestigationState, TransactionData
 from app.models import Transaction, User
@@ -105,6 +106,7 @@ def test_scrum_65_triple_rule_transaction_fans_out_to_its_two_mapped_tool_branch
     assert set(result["evidence"].keys()) == {"get_merchant_risk_score", "get_geo_distance"}
     assert result["evidence"]["get_merchant_risk_score"]["merchant"] == "Meridian Duty-Free Traders"
     assert result["evidence"]["get_geo_distance"]["latitude"] == seed_transaction.latitude
+    assert result["tool_errors"] == {}
     assert result["rationale"] == ""  # assemble_rationale is a no-op placeholder until SCRUM-53
 
 
@@ -136,13 +138,18 @@ def test_velocity_only_flag_visits_get_transaction_history_branch():
     result = investigation_graph.invoke(state)
 
     assert set(result["evidence"].keys()) == {"get_transaction_history"}
+    assert result["tool_errors"] == {}
 
 
 def test_amount_deviation_only_flag_has_no_tool_and_routes_straight_to_assemble():
     """amount_deviation maps to no tool (SCRUM-51) -- its evidence already
     comes from the rules engine, not a tool call, so a flag triggered by
     only that rule should reach assemble_rationale with no evidence
-    gathered rather than being routed nowhere.
+    gathered rather than being routed nowhere. plan_tool_calls still emits
+    an AIMessage (with an empty tool_calls list); tools_condition reads
+    that and routes straight past the "tools" node to assemble_rationale --
+    confirmed here by there being exactly one message (plan_tool_calls's)
+    and zero ToolMessages, proving ToolNode never ran.
     """
     state: InvestigationState = {
         "transaction": {
@@ -164,13 +171,110 @@ def test_amount_deviation_only_flag_has_no_tool_and_routes_straight_to_assemble(
     result = investigation_graph.invoke(state)
 
     assert result["evidence"] == {}
+    assert result["tool_errors"] == {}
+    assert len(result["messages"]) == 1
+    assert result["messages"][0].tool_calls == []
+
+
+class TestPlanToolCalls:
+    """SCRUM-51: direct unit tests of plan_tool_calls, isolating the
+    deterministic-planning step (which tool_calls get built) from the
+    routing/execution tests above (which cover the graph reaching the
+    right branches end to end).
+    """
+
+    def test_builds_one_tool_call_per_mapped_rule_with_deterministic_ids(self):
+        state: InvestigationState = {
+            "transaction": {
+                "id": 42,
+                "user_id": 7,
+                "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                "merchant": "Meridian Duty-Free Traders",
+                "category": "shopping",
+                "amount": Decimal("500.00"),
+                "latitude": 14.5995,
+                "longitude": 120.9842,
+                "location_label": "Manila, Philippines",
+            },
+            "rule_names": ["new_merchant_risk", "amount_deviation", "geographic_anomaly"],
+            "evidence": {},
+            "rationale": "",
+        }
+
+        result = plan_tool_calls(state)
+
+        [ai_message] = result["messages"]
+        names = {call["name"] for call in ai_message.tool_calls}
+        assert names == {"get_merchant_risk_score", "get_geo_distance"}
+        ids = {call["id"] for call in ai_message.tool_calls}
+        # Derived from tool name + transaction id, not a random uuid -- stable
+        # across repeated runs of the same transaction.
+        assert ids == {"get_merchant_risk_score-42", "get_geo_distance-42"}
+
+    def test_amount_deviation_only_produces_zero_tool_calls(self):
+        state: InvestigationState = {
+            "transaction": {
+                "id": 2,
+                "user_id": 1,
+                "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                "merchant": "Test Merchant",
+                "category": "shopping",
+                "amount": Decimal("500.00"),
+                "latitude": 47.6062,
+                "longitude": -122.3321,
+                "location_label": "Seattle, WA",
+            },
+            "rule_names": ["amount_deviation"],
+            "evidence": {},
+            "rationale": "",
+        }
+
+        result = plan_tool_calls(state)
+
+        [ai_message] = result["messages"]
+        assert ai_message.tool_calls == []
+
+
+def test_tool_exception_is_isolated_and_recorded_in_tool_errors(monkeypatch):
+    """SCRUM-51 groundwork for SCRUM-56 (not the fallback itself): ToolNode
+    is configured with handle_tool_errors=True, so a tool raising becomes an
+    error ToolMessage instead of crashing the graph. assemble_rationale
+    records that in tool_errors (keyed by tool name) and leaves the failed
+    tool's evidence key absent entirely -- never a substitute value. The
+    OTHER tool call in the same parallel batch (get_merchant_risk_score)
+    must still complete and populate its own evidence key, proving the two
+    parallel tool failures/successes are isolated from each other.
+    """
+    start_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    [(seed_transaction, _)] = generate_triple_rule_fraud(user_id=1, start_date=start_date)
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("simulated get_geo_distance failure")
+
+    monkeypatch.setattr(graph_module.get_geo_distance, "func", _raise)
+
+    state: InvestigationState = {
+        "transaction": _transaction_data(seed_transaction, id_=999, user_id=1),
+        "rule_names": ["new_merchant_risk", "amount_deviation", "geographic_anomaly"],
+        "evidence": {},
+        "rationale": "",
+    }
+
+    result = investigation_graph.invoke(state)
+
+    assert set(result["evidence"].keys()) == {"get_merchant_risk_score"}
+    assert result["evidence"]["get_merchant_risk_score"]["merchant"] == "Meridian Duty-Free Traders"
+    assert "get_geo_distance" not in result["evidence"]
+    assert "get_geo_distance" in result["tool_errors"]
+    assert "simulated get_geo_distance failure" in result["tool_errors"]["get_geo_distance"]
 
 
 class TestGetTransactionHistory:
-    """SCRUM-48: direct unit tests of the get_transaction_history node
-    against a real (in-memory SQLite) DB session, independent of the graph's
-    routing -- the routing tests above already cover that this node gets
-    reached for a velocity-only flag.
+    """SCRUM-48/51: direct unit tests of the get_transaction_history tool's
+    underlying function (via .func, bypassing the Runnable/tool_call
+    envelope), against a real (in-memory SQLite) DB session, independent of
+    the graph's routing -- the routing tests above already cover that this
+    tool gets called for a velocity-only flag.
     """
 
     def _seed_user_and_anchor(self, db, *, anchor: datetime) -> tuple[User, Transaction]:
@@ -186,7 +290,7 @@ class TestGetTransactionHistory:
         anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         db = TestingSessionLocal()
         try:
-            user, anchor_transaction = self._seed_user_and_anchor(db, anchor=anchor)
+            user, _ = self._seed_user_and_anchor(db, anchor=anchor)
             # 4 minutes before the anchor, inside the 10-minute window.
             inside = _make_transaction(
                 user.id, anchor - timedelta(minutes=4), merchant="Corner Store", amount=Decimal("5.00")
@@ -199,17 +303,10 @@ class TestGetTransactionHistory:
             db.add_all([inside, boundary])
             db.commit()
 
-            state: InvestigationState = {
-                "transaction": _transaction_data(anchor_transaction, id_=anchor_transaction.id, user_id=user.id),
-                "rule_names": ["velocity"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_transaction_history(state)
+            _content, evidence = get_transaction_history.func(user_id=user.id, anchor_timestamp=anchor)
         finally:
             db.close()
 
-        evidence = result["evidence"]["get_transaction_history"]
         assert evidence["user_id"] == user.id
         assert evidence["count"] == 3
         merchants = {t["merchant"] for t in evidence["transactions"]}
@@ -219,7 +316,7 @@ class TestGetTransactionHistory:
         anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         db = TestingSessionLocal()
         try:
-            user, anchor_transaction = self._seed_user_and_anchor(db, anchor=anchor)
+            user, _ = self._seed_user_and_anchor(db, anchor=anchor)
             # 11 minutes before the anchor -- just outside the 10-minute window.
             outside = _make_transaction(
                 user.id, anchor - timedelta(minutes=11), merchant="Too Early Shop", amount=Decimal("15.00")
@@ -231,17 +328,10 @@ class TestGetTransactionHistory:
             db.add_all([outside, after])
             db.commit()
 
-            state: InvestigationState = {
-                "transaction": _transaction_data(anchor_transaction, id_=anchor_transaction.id, user_id=user.id),
-                "rule_names": ["velocity"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_transaction_history(state)
+            _content, evidence = get_transaction_history.func(user_id=user.id, anchor_timestamp=anchor)
         finally:
             db.close()
 
-        evidence = result["evidence"]["get_transaction_history"]
         assert evidence["count"] == 1
         assert [t["merchant"] for t in evidence["transactions"]] == ["Anchor Merchant"]
 
@@ -256,36 +346,20 @@ class TestGetTransactionHistory:
             db.add(_make_transaction(other_user.id, anchor, merchant="Someone Else's Purchase"))
             db.commit()
 
-            state: InvestigationState = {
-                "transaction": {
-                    "id": 12345,
-                    "user_id": 999,
-                    "timestamp": anchor,
-                    "merchant": "Test Merchant",
-                    "category": "groceries",
-                    "amount": Decimal("10.00"),
-                    "latitude": 47.6062,
-                    "longitude": -122.3321,
-                    "location_label": "Seattle, WA",
-                },
-                "rule_names": ["velocity"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_transaction_history(state)
+            _content, evidence = get_transaction_history.func(user_id=999, anchor_timestamp=anchor)
         finally:
             db.close()
 
-        evidence = result["evidence"]["get_transaction_history"]
         assert evidence["transactions"] == []
         assert evidence["count"] == 0
 
 
 class TestGetMerchantRiskScore:
-    """SCRUM-49: direct unit tests of the get_merchant_risk_score node
-    against a real (in-memory SQLite) DB session, independent of the
-    graph's routing -- the SCRUM-65 routing test above already covers that
-    this node gets reached for a new_merchant_risk flag.
+    """SCRUM-49/51: direct unit tests of the get_merchant_risk_score tool's
+    underlying function (via .func), against a real (in-memory SQLite) DB
+    session, independent of the graph's routing -- the SCRUM-65 routing
+    test above already covers that this tool gets called for a
+    new_merchant_risk flag.
     """
 
     def test_true_first_time_transaction_is_flagged_first_with_zero_prior_count(self):
@@ -301,21 +375,15 @@ class TestGetMerchantRiskScore:
             other_merchant_history = _make_transaction(
                 user.id, anchor - timedelta(days=1), merchant="Corner Store", amount=Decimal("5.00")
             )
-            anchor_transaction = _make_transaction(user.id, anchor, merchant="New Boutique", amount=Decimal("50.00"))
-            db.add_all([other_merchant_history, anchor_transaction])
+            db.add(other_merchant_history)
             db.commit()
 
-            state: InvestigationState = {
-                "transaction": _transaction_data(anchor_transaction, id_=anchor_transaction.id, user_id=user.id),
-                "rule_names": ["new_merchant_risk"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_merchant_risk_score(state)
+            _content, evidence = get_merchant_risk_score.func(
+                user_id=user.id, merchant="New Boutique", anchor_timestamp=anchor
+            )
         finally:
             db.close()
 
-        evidence = result["evidence"]["get_merchant_risk_score"]
         assert evidence["is_first_transaction"] is True
         assert evidence["prior_transaction_count"] == 0
         assert evidence["risk_tier"] is None
@@ -333,58 +401,40 @@ class TestGetMerchantRiskScore:
             second_purchase = _make_transaction(
                 user.id, anchor - timedelta(days=1), merchant="Regular Cafe", amount=Decimal("6.50")
             )
-            anchor_transaction = _make_transaction(user.id, anchor, merchant="Regular Cafe", amount=Decimal("7.00"))
-            db.add_all([first_purchase, second_purchase, anchor_transaction])
+            db.add_all([first_purchase, second_purchase])
             db.commit()
 
-            state: InvestigationState = {
-                "transaction": _transaction_data(anchor_transaction, id_=anchor_transaction.id, user_id=user.id),
-                "rule_names": ["new_merchant_risk"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_merchant_risk_score(state)
+            _content, evidence = get_merchant_risk_score.func(
+                user_id=user.id, merchant="Regular Cafe", anchor_timestamp=anchor
+            )
         finally:
             db.close()
 
-        evidence = result["evidence"]["get_merchant_risk_score"]
         assert evidence["is_first_transaction"] is False
         assert evidence["prior_transaction_count"] == 2
 
     def test_user_merchant_pair_with_no_history_at_all_is_treated_as_first(self):
         """Mirrors get_transaction_history's empty-history test: a
-        synthetic state referencing a user/merchant pair with nothing
-        persisted for it at all still resolves cleanly rather than erroring.
+        user/merchant pair with nothing persisted for it at all still
+        resolves cleanly rather than erroring.
         """
-        state: InvestigationState = {
-            "transaction": {
-                "id": 12345,
-                "user_id": 999,
-                "timestamp": datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
-                "merchant": "Nonexistent Merchant",
-                "category": "groceries",
-                "amount": Decimal("10.00"),
-                "latitude": 47.6062,
-                "longitude": -122.3321,
-                "location_label": "Seattle, WA",
-            },
-            "rule_names": ["new_merchant_risk"],
-            "evidence": {},
-            "rationale": "",
-        }
-        result = get_merchant_risk_score(state)
+        _content, evidence = get_merchant_risk_score.func(
+            user_id=999,
+            merchant="Nonexistent Merchant",
+            anchor_timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
 
-        evidence = result["evidence"]["get_merchant_risk_score"]
         assert evidence["is_first_transaction"] is True
         assert evidence["prior_transaction_count"] == 0
         assert evidence["risk_tier"] is None
 
 
 class TestGetGeoDistance:
-    """SCRUM-50: direct unit tests of the get_geo_distance node against a
-    real (in-memory SQLite) DB session, independent of the graph's routing
-    (the SCRUM-65 routing test above already covers this node getting
-    reached for a geographic_anomaly flag).
+    """SCRUM-50/51: direct unit tests of the get_geo_distance tool's
+    underlying function (via .func), against a real (in-memory SQLite) DB
+    session, independent of the graph's routing (the SCRUM-65 routing test
+    above already covers this tool getting called for a geographic_anomaly
+    flag).
     """
 
     def _seed_user_and_history(self, db, *, anchor: datetime, count: int, **location_kwargs) -> tuple[User, list]:
@@ -418,13 +468,12 @@ class TestGetGeoDistance:
         try:
             user, history = self._seed_user_and_history(db, anchor=seed_transaction.timestamp, count=5)
 
-            state: InvestigationState = {
-                "transaction": _transaction_data(seed_transaction, id_=999, user_id=user.id),
-                "rule_names": ["geographic_anomaly"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_geo_distance(state)
+            _content, evidence = get_geo_distance.func(
+                user_id=user.id,
+                latitude=seed_transaction.latitude,
+                longitude=seed_transaction.longitude,
+                anchor_timestamp=seed_transaction.timestamp,
+            )
 
             expected_lat, expected_lon = _centroid(history)
             expected_miles = _haversine_miles(
@@ -441,7 +490,6 @@ class TestGetGeoDistance:
         finally:
             db.close()
 
-        evidence = result["evidence"]["get_geo_distance"]
         assert evidence["user_id"] == user.id
         assert evidence["latitude"] == seed_transaction.latitude
         assert evidence["longitude"] == seed_transaction.longitude
@@ -454,27 +502,12 @@ class TestGetGeoDistance:
         try:
             user, _ = self._seed_user_and_history(db, anchor=anchor, count=5)
 
-            state: InvestigationState = {
-                "transaction": {
-                    "id": 999,
-                    "user_id": user.id,
-                    "timestamp": anchor,
-                    "merchant": "Far Away Shop",
-                    "category": "shopping",
-                    "amount": Decimal("500.00"),
-                    "latitude": 14.5995,
-                    "longitude": 120.9842,
-                    "location_label": "Manila, Philippines",
-                },
-                "rule_names": ["geographic_anomaly"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_geo_distance(state)
+            _content, evidence = get_geo_distance.func(
+                user_id=user.id, latitude=14.5995, longitude=120.9842, anchor_timestamp=anchor
+            )
         finally:
             db.close()
 
-        evidence = result["evidence"]["get_geo_distance"]
         assert evidence["distance_miles"] is not None
         assert evidence["distance_km"] == pytest.approx(evidence["distance_miles"] * KM_PER_MILE)
 
@@ -488,51 +521,24 @@ class TestGetGeoDistance:
         try:
             user, _ = self._seed_user_and_history(db, anchor=anchor, count=4)
 
-            state: InvestigationState = {
-                "transaction": {
-                    "id": 999,
-                    "user_id": user.id,
-                    "timestamp": anchor,
-                    "merchant": "Far Away Shop",
-                    "category": "shopping",
-                    "amount": Decimal("500.00"),
-                    "latitude": 14.5995,
-                    "longitude": 120.9842,
-                    "location_label": "Manila, Philippines",
-                },
-                "rule_names": ["geographic_anomaly"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_geo_distance(state)
+            _content, evidence = get_geo_distance.func(
+                user_id=user.id, latitude=14.5995, longitude=120.9842, anchor_timestamp=anchor
+            )
         finally:
             db.close()
 
-        evidence = result["evidence"]["get_geo_distance"]
         assert evidence["distance_km"] is None
         assert evidence["distance_miles"] is None
         assert evidence["typical_location_label"] is None
 
     def test_user_with_no_history_at_all_returns_none_with_no_fabricated_values(self):
-        state: InvestigationState = {
-            "transaction": {
-                "id": 12345,
-                "user_id": 999,
-                "timestamp": datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
-                "merchant": "Far Away Shop",
-                "category": "shopping",
-                "amount": Decimal("500.00"),
-                "latitude": 14.5995,
-                "longitude": 120.9842,
-                "location_label": "Manila, Philippines",
-            },
-            "rule_names": ["geographic_anomaly"],
-            "evidence": {},
-            "rationale": "",
-        }
-        result = get_geo_distance(state)
+        _content, evidence = get_geo_distance.func(
+            user_id=999,
+            latitude=14.5995,
+            longitude=120.9842,
+            anchor_timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
 
-        evidence = result["evidence"]["get_geo_distance"]
         assert evidence["distance_km"] is None
         assert evidence["distance_miles"] is None
         assert evidence["typical_location_label"] is None
@@ -552,27 +558,13 @@ class TestGetGeoDistance:
             db.add_all(history)
             db.commit()
 
-            state: InvestigationState = {
-                "transaction": {
-                    "id": 999,
-                    "user_id": user.id,
-                    "timestamp": anchor,
-                    "merchant": "Far Away Shop",
-                    "category": "shopping",
-                    "amount": Decimal("500.00"),
-                    "latitude": 14.5995,
-                    "longitude": 120.9842,
-                    "location_label": "Manila, Philippines",
-                },
-                "rule_names": ["geographic_anomaly"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_geo_distance(state)
+            _content, evidence = get_geo_distance.func(
+                user_id=user.id, latitude=14.5995, longitude=120.9842, anchor_timestamp=anchor
+            )
         finally:
             db.close()
 
-        assert result["evidence"]["get_geo_distance"]["typical_location_label"] == "Seattle, WA"
+        assert evidence["typical_location_label"] == "Seattle, WA"
 
     def test_typical_location_label_tie_is_broken_alphabetically(self):
         """Two labels tied at 2 occurrences each, one at 1 -- "Bellevue, WA"
@@ -593,24 +585,10 @@ class TestGetGeoDistance:
             db.add_all(history)
             db.commit()
 
-            state: InvestigationState = {
-                "transaction": {
-                    "id": 999,
-                    "user_id": user.id,
-                    "timestamp": anchor,
-                    "merchant": "Far Away Shop",
-                    "category": "shopping",
-                    "amount": Decimal("500.00"),
-                    "latitude": 14.5995,
-                    "longitude": 120.9842,
-                    "location_label": "Manila, Philippines",
-                },
-                "rule_names": ["geographic_anomaly"],
-                "evidence": {},
-                "rationale": "",
-            }
-            result = get_geo_distance(state)
+            _content, evidence = get_geo_distance.func(
+                user_id=user.id, latitude=14.5995, longitude=120.9842, anchor_timestamp=anchor
+            )
         finally:
             db.close()
 
-        assert result["evidence"]["get_geo_distance"]["typical_location_label"] == "Bellevue, WA"
+        assert evidence["typical_location_label"] == "Bellevue, WA"
