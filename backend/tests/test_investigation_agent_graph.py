@@ -9,12 +9,19 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.investigation_agent import graph as graph_module
 from app.investigation_agent.graph import (
+    KM_PER_MILE,
+    get_geo_distance,
     get_merchant_risk_score,
     get_transaction_history,
     investigation_graph,
 )
 from app.investigation_agent.state import InvestigationState, TransactionData
 from app.models import Transaction, User
+from app.rules.geographic_anomaly import (
+    _centroid,
+    _haversine_miles,
+    evaluate_geographic_anomaly,
+)
 from scripts.seed_transactions import generate_triple_rule_fraud
 
 # Same in-memory-SQLite-per-test pattern as tests/test_transactions.py, applied
@@ -58,6 +65,9 @@ def _make_transaction(
     *,
     merchant: str = "Test Merchant",
     amount: Decimal = Decimal("10.00"),
+    latitude: float = 47.6062,
+    longitude: float = -122.3321,
+    location_label: str = "Seattle, WA",
 ) -> Transaction:
     return Transaction(
         user_id=user_id,
@@ -65,9 +75,9 @@ def _make_transaction(
         merchant=merchant,
         category="groceries",
         amount=amount,
-        latitude=47.6062,
-        longitude=-122.3321,
-        location_label="Seattle, WA",
+        latitude=latitude,
+        longitude=longitude,
+        location_label=location_label,
     )
 
 
@@ -368,3 +378,239 @@ class TestGetMerchantRiskScore:
         assert evidence["is_first_transaction"] is True
         assert evidence["prior_transaction_count"] == 0
         assert evidence["risk_tier"] is None
+
+
+class TestGetGeoDistance:
+    """SCRUM-50: direct unit tests of the get_geo_distance node against a
+    real (in-memory SQLite) DB session, independent of the graph's routing
+    (the SCRUM-65 routing test above already covers this node getting
+    reached for a geographic_anomaly flag).
+    """
+
+    def _seed_user_and_history(self, db, *, anchor: datetime, count: int, **location_kwargs) -> tuple[User, list]:
+        user = User(name="Test User")
+        db.add(user)
+        db.flush()
+        history = [
+            _make_transaction(user.id, anchor - timedelta(days=count - i), **location_kwargs)
+            for i in range(count)
+        ]
+        db.add_all(history)
+        db.commit()
+        return user, history
+
+    def test_distance_matches_geographic_anomalys_own_computation(self):
+        """Seeds a tight Seattle-area prior history (matching the rule's
+        MIN_HISTORY_COUNT floor exactly) and uses the SCRUM-65 Meridian
+        Duty-Free Traders transaction (Manila) as the flagged one. Rather
+        than hand-computing an independent expected distance (which could
+        just as easily drift from the rule as a from-scratch tool
+        implementation would), this asserts the tool's output against
+        _centroid/_haversine_miles -- the exact functions both the rule and
+        the tool now share -- and separately confirms the rule itself
+        actually flags this history+transaction pair as anomalous, so the
+        two can't silently disagree about what "anomalous" means here.
+        """
+        start_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        [(seed_transaction, _)] = generate_triple_rule_fraud(user_id=1, start_date=start_date)
+
+        db = TestingSessionLocal()
+        try:
+            user, history = self._seed_user_and_history(db, anchor=seed_transaction.timestamp, count=5)
+
+            state: InvestigationState = {
+                "transaction": _transaction_data(seed_transaction, id_=999, user_id=user.id),
+                "rule_names": ["geographic_anomaly"],
+                "evidence": {},
+                "rationale": "",
+            }
+            result = get_geo_distance(state)
+
+            expected_lat, expected_lon = _centroid(history)
+            expected_miles = _haversine_miles(
+                expected_lat, expected_lon, seed_transaction.latitude, seed_transaction.longitude
+            )
+            # history's timestamps come back tz-naive after the commit above
+            # (SQLite drops the offset on round-trip); seed_transaction was
+            # never persisted, so it's still tz-aware. evaluate_geographic_anomaly
+            # sorts by timestamp, so mixing the two raises -- strip
+            # seed_transaction's tzinfo here (after get_geo_distance already
+            # ran) purely so this sanity check can compare like with like.
+            seed_transaction.timestamp = seed_transaction.timestamp.replace(tzinfo=None)
+            rule_hits = evaluate_geographic_anomaly([*history, seed_transaction])
+        finally:
+            db.close()
+
+        evidence = result["evidence"]["get_geo_distance"]
+        assert evidence["user_id"] == user.id
+        assert evidence["latitude"] == seed_transaction.latitude
+        assert evidence["longitude"] == seed_transaction.longitude
+        assert evidence["distance_miles"] == pytest.approx(expected_miles)
+        assert len(rule_hits) == 1  # sanity: the rule agrees this is anomalous
+
+    def test_distance_km_is_consistent_with_distance_miles(self):
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        db = TestingSessionLocal()
+        try:
+            user, _ = self._seed_user_and_history(db, anchor=anchor, count=5)
+
+            state: InvestigationState = {
+                "transaction": {
+                    "id": 999,
+                    "user_id": user.id,
+                    "timestamp": anchor,
+                    "merchant": "Far Away Shop",
+                    "category": "shopping",
+                    "amount": Decimal("500.00"),
+                    "latitude": 14.5995,
+                    "longitude": 120.9842,
+                    "location_label": "Manila, Philippines",
+                },
+                "rule_names": ["geographic_anomaly"],
+                "evidence": {},
+                "rationale": "",
+            }
+            result = get_geo_distance(state)
+        finally:
+            db.close()
+
+        evidence = result["evidence"]["get_geo_distance"]
+        assert evidence["distance_miles"] is not None
+        assert evidence["distance_km"] == pytest.approx(evidence["distance_miles"] * KM_PER_MILE)
+
+    def test_insufficient_history_returns_none_with_no_fabricated_values(self):
+        """One short of MIN_HISTORY_COUNT (5) -- the same floor the rule
+        itself requires before computing a centroid -- so the tool must not
+        fabricate a distance or label from too small a sample.
+        """
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        db = TestingSessionLocal()
+        try:
+            user, _ = self._seed_user_and_history(db, anchor=anchor, count=4)
+
+            state: InvestigationState = {
+                "transaction": {
+                    "id": 999,
+                    "user_id": user.id,
+                    "timestamp": anchor,
+                    "merchant": "Far Away Shop",
+                    "category": "shopping",
+                    "amount": Decimal("500.00"),
+                    "latitude": 14.5995,
+                    "longitude": 120.9842,
+                    "location_label": "Manila, Philippines",
+                },
+                "rule_names": ["geographic_anomaly"],
+                "evidence": {},
+                "rationale": "",
+            }
+            result = get_geo_distance(state)
+        finally:
+            db.close()
+
+        evidence = result["evidence"]["get_geo_distance"]
+        assert evidence["distance_km"] is None
+        assert evidence["distance_miles"] is None
+        assert evidence["typical_location_label"] is None
+
+    def test_user_with_no_history_at_all_returns_none_with_no_fabricated_values(self):
+        state: InvestigationState = {
+            "transaction": {
+                "id": 12345,
+                "user_id": 999,
+                "timestamp": datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+                "merchant": "Far Away Shop",
+                "category": "shopping",
+                "amount": Decimal("500.00"),
+                "latitude": 14.5995,
+                "longitude": 120.9842,
+                "location_label": "Manila, Philippines",
+            },
+            "rule_names": ["geographic_anomaly"],
+            "evidence": {},
+            "rationale": "",
+        }
+        result = get_geo_distance(state)
+
+        evidence = result["evidence"]["get_geo_distance"]
+        assert evidence["distance_km"] is None
+        assert evidence["distance_miles"] is None
+        assert evidence["typical_location_label"] is None
+
+    def test_typical_location_label_is_the_most_frequent_prior_label(self):
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        db = TestingSessionLocal()
+        try:
+            user = User(name="Test User")
+            db.add(user)
+            db.flush()
+            labels = ["Seattle, WA", "Seattle, WA", "Seattle, WA", "Portland, OR", "Portland, OR"]
+            history = [
+                _make_transaction(user.id, anchor - timedelta(days=len(labels) - i), location_label=label)
+                for i, label in enumerate(labels)
+            ]
+            db.add_all(history)
+            db.commit()
+
+            state: InvestigationState = {
+                "transaction": {
+                    "id": 999,
+                    "user_id": user.id,
+                    "timestamp": anchor,
+                    "merchant": "Far Away Shop",
+                    "category": "shopping",
+                    "amount": Decimal("500.00"),
+                    "latitude": 14.5995,
+                    "longitude": 120.9842,
+                    "location_label": "Manila, Philippines",
+                },
+                "rule_names": ["geographic_anomaly"],
+                "evidence": {},
+                "rationale": "",
+            }
+            result = get_geo_distance(state)
+        finally:
+            db.close()
+
+        assert result["evidence"]["get_geo_distance"]["typical_location_label"] == "Seattle, WA"
+
+    def test_typical_location_label_tie_is_broken_alphabetically(self):
+        """Two labels tied at 2 occurrences each, one at 1 -- "Bellevue, WA"
+        sorts before "Seattle, WA", so it wins the tie (see
+        _most_common_location_label's min()-based tiebreak).
+        """
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        db = TestingSessionLocal()
+        try:
+            user = User(name="Test User")
+            db.add(user)
+            db.flush()
+            labels = ["Bellevue, WA", "Bellevue, WA", "Seattle, WA", "Seattle, WA", "Portland, OR"]
+            history = [
+                _make_transaction(user.id, anchor - timedelta(days=len(labels) - i), location_label=label)
+                for i, label in enumerate(labels)
+            ]
+            db.add_all(history)
+            db.commit()
+
+            state: InvestigationState = {
+                "transaction": {
+                    "id": 999,
+                    "user_id": user.id,
+                    "timestamp": anchor,
+                    "merchant": "Far Away Shop",
+                    "category": "shopping",
+                    "amount": Decimal("500.00"),
+                    "latitude": 14.5995,
+                    "longitude": 120.9842,
+                    "location_label": "Manila, Philippines",
+                },
+                "rule_names": ["geographic_anomaly"],
+                "evidence": {},
+                "rationale": "",
+            }
+            result = get_geo_distance(state)
+        finally:
+            db.close()
+
+        assert result["evidence"]["get_geo_distance"]["typical_location_label"] == "Bellevue, WA"

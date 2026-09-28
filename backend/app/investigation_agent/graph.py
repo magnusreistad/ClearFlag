@@ -1,10 +1,10 @@
-"""Investigation Agent StateGraph skeleton (SCRUM-47).
+"""Investigation Agent StateGraph (SCRUM-47).
 
 Routes evidence-gathering tool calls based on which rule(s) flagged a
-transaction. Pure scaffolding: the router and fan-out edges are real, but
-the three tool nodes below return dummy/passthrough evidence -- SCRUM-48/49/50
-drop in the real get_transaction_history / get_merchant_risk_score /
-get_geo_distance logic without touching this file's node/edge structure.
+transaction. The router and fan-out edges are scaffolding from SCRUM-47;
+get_transaction_history / get_merchant_risk_score / get_geo_distance
+(SCRUM-48/49/50) are the real evidence-gathering implementations dropped in
+without touching that node/edge structure.
 
 Not wired into the live FastAPI request path yet (that's SCRUM-53). The
 interim formatter in app.rules.engine (concatenate_rationales) stays the
@@ -12,6 +12,7 @@ interim formatter in app.rules.engine (concatenate_rationales) stays the
 afterward as the on-failure fallback path (SCRUM-56).
 """
 
+from collections import Counter
 from datetime import timedelta
 from typing import Literal
 
@@ -20,7 +21,14 @@ from langgraph.graph import END, StateGraph
 from app.database import SessionLocal
 from app.investigation_agent.state import InvestigationState
 from app.models import Transaction
+from app.rules.geographic_anomaly import MIN_HISTORY_COUNT, _centroid, _haversine_miles
 from app.rules.velocity import DEFAULT_WINDOW_MINUTES
+
+# 1 mile in kilometers, exact by definition (1 in = 2.54 cm) -- used to
+# convert get_geo_distance's haversine-in-miles (the unit
+# app.rules.geographic_anomaly itself thresholds on) into the km the
+# SCRUM-50 contract asks for, without a second distance computation.
+KM_PER_MILE = 1.609344
 
 TOOL_NODE_NAMES = ("get_transaction_history", "get_merchant_risk_score", "get_geo_distance")
 
@@ -167,23 +175,95 @@ def get_merchant_risk_score(state: InvestigationState) -> dict:
     }
 
 
-def get_geo_distance(state: InvestigationState) -> dict:
-    """Placeholder for SCRUM-50.
+def _most_common_location_label(history: list[Transaction]) -> str:
+    """Most frequent location_label among `history`. Ties (more than one
+    label sharing the max count) are broken alphabetically, via min() over
+    the tied labels -- arbitrary but deterministic, which a tiebreak only
+    needs to be here since there's no notion of one label being more
+    "correct" than another at equal frequency.
+    """
+    counts = Counter(t.location_label for t in history)
+    max_count = max(counts.values())
+    return min(label for label, count in counts.items() if count == max_count)
 
-    Real inputs (per SCRUM-50): user_id, transaction_lat, transaction_long.
-    Real output: distance_km, typical_location_label. Triggered by the
-    geographic_anomaly rule.
+
+def get_geo_distance(state: InvestigationState) -> dict:
+    """SCRUM-50. Triggered by the geographic_anomaly rule.
+
+    Mirrors app.rules.geographic_anomaly's own math instead of reinventing
+    it: the same prior-transaction set (this user's transactions strictly
+    before the flagged one -- approximating the rule's ordered[:i] slice of
+    its full-history sort the same way get_merchant_risk_score (SCRUM-49)
+    approximates "prior" with strict timestamp <, rather than replaying the
+    rule's exact index-in-full-sorted-history walk here), the same
+    plain-mean lat/lon centroid over that set (_centroid), and the same
+    haversine distance from that centroid to the flagged transaction
+    (_haversine_miles) -- both imported from the rule module rather than
+    reimplemented, so this tool can't silently drift from what the rule
+    itself computed.
+
+    The rule thresholds in miles (EARTH_RADIUS_MILES), but the SCRUM-50
+    contract's output field is distance_km -- so both are returned:
+    distance_miles is the exact figure the rule itself compared against its
+    z-score threshold (for a rationale/guardrail to cite), distance_km is
+    that same great-circle distance converted to km (KM_PER_MILE), not a
+    second computation.
+
+    typical_location_label comes from the same prior-transaction set's
+    location_label column (the only location-descriptive column on
+    Transaction), taking the most frequent value -- see
+    _most_common_location_label for tie handling. No geocoding API is
+    called; this is a lookup over data already in the transactions table.
+
+    Never fabricates (Design Doc SS5): with fewer than
+    geographic_anomaly.MIN_HISTORY_COUNT prior transactions -- the same
+    floor the rule itself requires before it will compute a centroid at
+    all -- distance_km, distance_miles, and typical_location_label are all
+    None rather than a guess from too small a sample.
+
+    Opens its own session via SessionLocal, same as get_transaction_history
+    (SCRUM-48) and get_merchant_risk_score (SCRUM-49) and for the same
+    reason: not on the FastAPI request path yet.
     """
     transaction = state["transaction"]
+    user_id = transaction["user_id"]
+    latitude = transaction["latitude"]
+    longitude = transaction["longitude"]
+    anchor_timestamp = transaction["timestamp"]
+
+    db = SessionLocal()
+    try:
+        history = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user_id,
+                Transaction.timestamp < anchor_timestamp,
+            )
+            .order_by(Transaction.timestamp)
+            .all()
+        )
+    finally:
+        db.close()
+
+    distance_km = None
+    distance_miles = None
+    typical_location_label = None
+
+    if len(history) >= MIN_HISTORY_COUNT:
+        centroid_lat, centroid_lon = _centroid(history)
+        distance_miles = _haversine_miles(centroid_lat, centroid_lon, latitude, longitude)
+        distance_km = distance_miles * KM_PER_MILE
+        typical_location_label = _most_common_location_label(history)
+
     return {
         "evidence": {
             "get_geo_distance": {
-                "_placeholder": True,
-                "user_id": transaction["user_id"],
-                "latitude": transaction["latitude"],
-                "longitude": transaction["longitude"],
-                "distance_km": None,
-                "typical_location_label": None,
+                "user_id": user_id,
+                "latitude": latitude,
+                "longitude": longitude,
+                "distance_km": distance_km,
+                "distance_miles": distance_miles,
+                "typical_location_label": typical_location_label,
             }
         }
     }

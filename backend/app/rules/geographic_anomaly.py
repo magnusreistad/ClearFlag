@@ -51,6 +51,19 @@ def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
     return EARTH_RADIUS_MILES * c
 
 
+def _centroid(transactions: Sequence[Transaction]) -> tuple[float, float]:
+    """Plain arithmetic mean of lat/lon across `transactions` -- the user's
+    "typical location cluster" (see the module-level note on this
+    simplification above `evaluate_geographic_anomaly`).
+
+    Factored out so app.investigation_agent.graph's get_geo_distance
+    (SCRUM-50) can compute the same "distance from typical location"
+    figure this rule flags on, without a second implementation that could
+    drift from this one.
+    """
+    return mean(t.latitude for t in transactions), mean(t.longitude for t in transactions)
+
+
 def evaluate_geographic_anomaly(
     transactions: Sequence[Transaction],
     *,
@@ -86,8 +99,7 @@ def evaluate_geographic_anomaly(
         if len(history) < min_history:
             continue
 
-        centroid_lat = mean(h.latitude for h in history)
-        centroid_lon = mean(h.longitude for h in history)
+        centroid_lat, centroid_lon = _centroid(history)
 
         historical_distances = [
             _haversine_miles(centroid_lat, centroid_lon, h.latitude, h.longitude) for h in history
