@@ -118,6 +118,19 @@ Use the unpooled connection string for local dev and migrations — Neon's poole
 
 Grab the correct connection string from the Neon dashboard's Connection Details panel — make sure the branch selector is set to **dev**, not production, before copying it for local work.
 
+### Running the Investigation Agent's LLM live
+
+The Investigation Agent's chat model (`backend/app/investigation_agent/llm.py`) defaults to a mocked, network-free model — this is what CI and the test suite always use, and what local dev gets with no extra setup. To see a real Claude call in a local demo instead:
+
+```
+INVESTIGATION_AGENT_LLM_MODE=live
+ANTHROPIC_API_KEY=<your-anthropic-api-key>
+```
+
+in `backend/.env`. Live mode refuses to run with no API key, and refuses to run at all when `CI` is set (GitHub Actions sets this automatically) — per the Investigation Agent Design Doc, there are no live LLM calls in CI, ever.
+
+`temperature` is not passed to the model unless you set `INVESTIGATION_AGENT_LLM_TEMPERATURE` explicitly — the default model rejects it as deprecated in favor of adaptive thinking, so only set this if you override `INVESTIGATION_AGENT_LLM_MODEL` to an older model that still accepts it.
+
 ## Database setup & migrations
 
 This project uses Alembic for schema migrations.
