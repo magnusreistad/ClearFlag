@@ -1,0 +1,41 @@
+{
+  "_source": "Real investigation_graph.invoke() run against the Neon dev branch for transaction 843 (Meridian Duty-Free Traders, SCRUM-65's planted triple-rule fraud, seeded user_id 2), captured 2026-09-29 for SCRUM-52. amount_deviation's category_mean/category_stdev were captured by independently replicating app.rules.amount_deviation's own history walk for this transaction's category (shopping) as of its timestamp -- the rules engine doesn't expose these structurally yet (see validation.py's payload-shape docstring); everything else here is exactly what the graph itself returned, unmodified.",
+  "payload": {
+    "transaction": {
+      "id": 843,
+      "user_id": 2,
+      "merchant": "Meridian Duty-Free Traders",
+      "category": "shopping",
+      "amount": "3200.00",
+      "location_label": "Manila, Philippines",
+      "latitude": 14.5995,
+      "longitude": 120.9842
+    },
+    "rule_names": ["new_merchant_risk", "amount_deviation", "geographic_anomaly"],
+    "rules": {
+      "amount_deviation": {
+        "amount": "3200.00",
+        "category_mean": "162.2013333333333333333333333",
+        "category_stdev": "411.1724170922354859218446882"
+      }
+    }
+  },
+  "evidence": {
+    "get_merchant_risk_score": {
+      "user_id": 2,
+      "merchant": "Meridian Duty-Free Traders",
+      "is_first_transaction": true,
+      "prior_transaction_count": 0,
+      "risk_tier": null
+    },
+    "get_geo_distance": {
+      "user_id": 2,
+      "latitude": 14.5995,
+      "longitude": 120.9842,
+      "distance_km": 10864.398029476926,
+      "distance_miles": 6750.823956517019,
+      "typical_location_label": "Seattle, WA"
+    }
+  },
+  "tool_errors": {}
+}
