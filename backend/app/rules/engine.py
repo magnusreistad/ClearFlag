@@ -1,6 +1,7 @@
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from app.models import Transaction
 from app.rules.amount_deviation import evaluate_amount_deviation
@@ -24,6 +25,10 @@ class FlagHit:
     transaction_id: int
     rule_name: str
     rationale: str
+    # SCRUM-68: carries each rule's own RuleHit.values through unchanged --
+    # engine.py doesn't compute or reshape these, just threads them onto the
+    # tagged hit alongside rule_name.
+    values: dict[str, Any] = field(default_factory=dict)
 
 
 def evaluate_all_rules(transactions: Sequence[Transaction]) -> list[FlagHit]:
@@ -34,7 +39,12 @@ def evaluate_all_rules(transactions: Sequence[Transaction]) -> list[FlagHit]:
     each individual evaluate_* function.
     """
     return [
-        FlagHit(transaction_id=hit.transaction_id, rule_name=rule_name, rationale=hit.rationale)
+        FlagHit(
+            transaction_id=hit.transaction_id,
+            rule_name=rule_name,
+            rationale=hit.rationale,
+            values=hit.values,
+        )
         for rule_name, evaluate in RULES.items()
         for hit in evaluate(transactions)
     ]
@@ -64,3 +74,16 @@ def rule_names_by_transaction(hits: Sequence[FlagHit]) -> dict[int, list[str]]:
     for hit in hits:
         names_by_transaction[hit.transaction_id].append(hit.rule_name)
     return dict(names_by_transaction)
+
+
+def rule_values_by_transaction(hits: Sequence[FlagHit]) -> dict[int, dict[str, dict[str, Any]]]:
+    """Group hits by transaction_id into {rule_name: values}, mirroring
+    rule_names_by_transaction's grouping (SCRUM-68). This is the per-rule
+    structured-facts counterpart an Investigation Agent payload needs
+    alongside rule_names -- see app.investigation_agent.payload.build_payload.
+    Transactions with no hits are absent from the result.
+    """
+    values_by_transaction: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for hit in hits:
+        values_by_transaction[hit.transaction_id][hit.rule_name] = hit.values
+    return dict(values_by_transaction)

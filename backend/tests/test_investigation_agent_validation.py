@@ -25,9 +25,11 @@ def _load_fixture() -> tuple[dict, dict]:
     payload = deepcopy(raw["payload"])
     payload["transaction"]["amount"] = Decimal(payload["transaction"]["amount"])
     amount_deviation = payload["rules"]["amount_deviation"]
-    amount_deviation["amount"] = Decimal(amount_deviation["amount"])
-    amount_deviation["category_mean"] = Decimal(amount_deviation["category_mean"])
-    amount_deviation["category_stdev"] = Decimal(amount_deviation["category_stdev"])
+    for key in ("amount", "category_mean", "category_stdev", "percent_above_mean"):
+        amount_deviation[key] = Decimal(amount_deviation[key])
+    new_merchant_risk = payload["rules"]["new_merchant_risk"]
+    for key in ("amount", "typical_first_purchase_mean", "typical_first_purchase_stdev", "percent_above_mean"):
+        new_merchant_risk[key] = Decimal(new_merchant_risk[key])
     evidence = deepcopy(raw["evidence"])
     return payload, evidence
 
@@ -133,19 +135,49 @@ class TestNamedEntityGrounding:
 
 
 class TestErroredToolNotCitable:
-    def test_value_from_errored_tool_fails(self, meridian):
+    """SCRUM-68 update: distance_miles is no longer a tool-only fact --
+    app.rules.geographic_anomaly.RuleHit.values now exposes the same
+    great-circle figure get_geo_distance computes, both legitimate citation
+    sources per the Design Doc (payload OR tool output). These tests now
+    exercise distance_km and typical_location_label instead -- the two
+    get_geo_distance fields this rule genuinely never computes -- to prove
+    "no tool call, no citation" still holds for facts only a tool produces.
+    """
+
+    def test_tool_only_numeric_value_fails(self, meridian):
         payload, evidence = meridian
         del evidence["get_geo_distance"]  # simulates get_geo_distance raising (SCRUM-51 tool_errors)
-        rationale = (
-            "This is your first purchase from Meridian Duty-Free Traders, and "
-            "it occurred 6,750.82 miles from your typical location."
-        )
+        rationale = "This occurred 10,864.40 km from your typical location."
 
         result = validate_rationale(rationale, payload, evidence)
 
         assert result.passed is False
         assert _violation_types(result) == ["ungrounded_number"]
-        assert result.violations[0].span == "6,750.82 miles"
+        assert result.violations[0].span == "10,864.40 km"
+
+    def test_tool_only_entity_fails(self, meridian):
+        payload, evidence = meridian
+        del evidence["get_geo_distance"]  # simulates get_geo_distance raising (SCRUM-51 tool_errors)
+        rationale = "This is far from Seattle, WA, your typical location."
+
+        result = validate_rationale(rationale, payload, evidence)
+
+        assert result.passed is False
+        assert _violation_types(result) == ["unsupported_entity"]
+        assert result.violations[0].span == "Seattle, WA"
+
+    def test_distance_miles_still_grounds_when_the_tool_fails_since_the_rule_also_computes_it(self, meridian):
+        """Confirms the SCRUM-68 restoration deliberately: distance_miles is
+        NOT tool-only anymore, so it stays citable even with get_geo_distance
+        evidence removed -- this is the intended behavior change, not a gap.
+        """
+        payload, evidence = meridian
+        del evidence["get_geo_distance"]
+        rationale = "This occurred 6,750.82 miles from where you usually shop."
+
+        result = validate_rationale(rationale, payload, evidence)
+
+        assert result.passed is True
 
 
 class TestEmptyRationale:

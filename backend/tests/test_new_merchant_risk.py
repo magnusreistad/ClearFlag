@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from statistics import mean, stdev
 
 import pytest
 from sqlalchemy import create_engine
@@ -111,6 +112,44 @@ def test_rationale_reports_percentage_over_mean():
     hits = evaluate_new_merchant_risk(txns)
 
     assert "777%" in hits[0].rationale
+
+
+def test_rationale_is_byte_identical_to_the_pre_scrum_68_format():
+    """SCRUM-68 snapshot: adding RuleHit.values must not change a single
+    character of the rationale string this rule has always produced."""
+    db = TestingSessionLocal()
+    user_id = new_user(db)
+    txns = create_first_time_purchases(db, user_id, [*HISTORY, Decimal("540.00")])
+    db.close()
+
+    hits = evaluate_new_merchant_risk(txns)
+
+    assert hits[0].rationale == (
+        "Flagged: This is your first purchase from this merchant, and the "
+        "amount is 777% higher than your typical first-time purchase."
+    )
+
+
+def test_values_populated_with_expected_keys_and_correct_figures():
+    """SCRUM-68: values must carry exactly the numbers the rationale string
+    is built from, computed the same way the rule itself does (verified
+    against statistics.mean/stdev directly, not hand-typed)."""
+    db = TestingSessionLocal()
+    user_id = new_user(db)
+    txns = create_first_time_purchases(db, user_id, [*HISTORY, Decimal("540.00")])
+    db.close()
+
+    hits = evaluate_new_merchant_risk(txns)
+
+    expected_mean = mean(HISTORY)
+    expected_stdev = stdev(HISTORY)  # already above MIN_STD_DEV_FLOOR, so the floor is inert
+    expected_pct = (Decimal("540.00") - expected_mean) / expected_mean * 100
+    assert hits[0].values == {
+        "amount": Decimal("540.00"),
+        "typical_first_purchase_mean": expected_mean,
+        "typical_first_purchase_stdev": expected_stdev,
+        "percent_above_mean": expected_pct,
+    }
 
 
 def test_too_few_historical_first_purchases_does_not_flag():

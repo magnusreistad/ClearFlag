@@ -1,8 +1,9 @@
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from statistics import mean, stdev
+from typing import Any
 
 from app.models import Transaction
 
@@ -34,6 +35,13 @@ MIN_STD_DEV_FLOOR = Decimal("1.00")
 class RuleHit:
     transaction_id: int
     rationale: str
+    # SCRUM-68: structural counterpart to the rationale prose -- amount and
+    # category_mean/category_stdev are the exact historical figures this hit
+    # was computed from (category_stdev already includes MIN_STD_DEV_FLOOR),
+    # and percent_above_mean is the same pct_higher the rationale rounds
+    # in-string. No new computation: every value here is a local variable
+    # already produced below.
+    values: dict[str, Any] = field(default_factory=dict)
 
 
 def evaluate_amount_deviation(
@@ -85,6 +93,12 @@ def evaluate_amount_deviation(
                             f"Flagged: This amount is {pct_higher:.0f}% higher "
                             f"than your typical spend in this category."
                         ),
+                        values={
+                            "amount": t.amount,
+                            "category_mean": historical_mean,
+                            "category_stdev": historical_stdev,
+                            "percent_above_mean": pct_higher,
+                        },
                     )
                 )
 

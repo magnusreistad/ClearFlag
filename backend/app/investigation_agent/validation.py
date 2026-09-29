@@ -16,8 +16,10 @@ graph yet.
 --- payload shape this module expects ---
 `payload` is a dict describing this invocation's rules-engine facts,
 independent of (and richer than) app.investigation_agent.state.
-TransactionData -- SCRUM-53 is responsible for actually assembling it when
-this validator is wired into the graph:
+TransactionData. app.investigation_agent.payload.build_payload assembles
+this shape from a flagged transaction plus app.rules.engine.FlagHit.values
+(SCRUM-68); SCRUM-53 is responsible for actually calling it once this
+validator is wired into the graph:
 
     {
         "transaction": {  # the flagged transaction's own citable fields
@@ -27,15 +29,30 @@ this validator is wired into the graph:
         },
         "rule_names": ["new_merchant_risk", "amount_deviation", ...],
         "rules": {
-            # Per-rule numeric facts the rules engine computed but today only
-            # bakes into RuleHit.rationale's prose (see app.rules.
-            # amount_deviation) rather than exposing structurally. Until
-            # SCRUM-53 extends the rules engine to expose these, this is the
-            # documented gap: whoever builds `payload` must source these the
-            # same way amount_deviation.py itself does.
+            # Per-rule numeric/string facts the rule itself already computed
+            # (RuleHit.values, SCRUM-68) -- shape varies by rule, see each
+            # rule module's RuleHit.values comment for exactly which keys it
+            # populates and why:
             "amount_deviation": {
                 "amount": Decimal, "category_mean": Decimal, "category_stdev": Decimal,
+                "percent_above_mean": Decimal,
             },
+            "new_merchant_risk": {
+                "amount": Decimal, "typical_first_purchase_mean": Decimal,
+                "typical_first_purchase_stdev": Decimal, "percent_above_mean": Decimal,
+            },
+            "geographic_anomaly": {
+                # distance_miles here is the same great-circle figure
+                # get_geo_distance (this rule's mapped tool) also returns as
+                # evidence["distance_miles"] -- both are legitimate citation
+                # sources per the Design Doc (SS5: payload OR tool output).
+                # "No tool call, no citation" governs facts ONLY a tool
+                # produces -- e.g. this same tool's distance_km and
+                # typical_location_label, which this rule never computes.
+                "location_label": str, "distance_miles": float,
+                "distance_mean_miles": float, "distance_stdev_miles": float,
+            },
+            "velocity": {"transaction_count": int, "window_minutes": int},
         },
     }
 
@@ -48,9 +65,11 @@ via a small explicit table (_UNIT_BY_KEY below) rather than a suffix guess
 over arbitrary keys -- a key not in that table is left unitless rather than
 guessed at, per the ticket's instruction. Current mapping:
 
-    amount, category_mean, category_stdev, percent_above_mean  -> "$" / "%"
-    distance_km                                                -> "km"
-    distance_miles                                              -> "mi"
+    amount, category_mean, category_stdev,
+    typical_first_purchase_mean, typical_first_purchase_stdev,
+    percent_above_mean                                          -> "$" / "$" / "%"
+    distance_km                                                  -> "km"
+    distance_miles, distance_mean_miles, distance_stdev_miles    -> "mi"
     everything else (ids, lat/lon, counts, booleans excluded)   -> None (unitless)
 
 A number written in the rationale with no recognizable unit token (no "$"
@@ -100,9 +119,20 @@ _UNIT_BY_KEY: dict[str, str] = {
     "amount": "$",
     "category_mean": "$",
     "category_stdev": "$",
+    # SCRUM-68: app.rules.new_merchant_risk.RuleHit.values' equivalent of
+    # category_mean/category_stdev -- kept as separate keys rather than
+    # reusing those two since it's a mean/stdev over first-time purchases
+    # across merchants, not a spend category; same unit ($), different fact.
+    "typical_first_purchase_mean": "$",
+    "typical_first_purchase_stdev": "$",
     "percent_above_mean": "%",
     "distance_km": "km",
     "distance_miles": "mi",
+    # SCRUM-68: app.rules.geographic_anomaly.RuleHit.values' historical
+    # mean/stdev distance-from-centroid this hit was compared against --
+    # same unit as distance_miles (miles), different fact.
+    "distance_mean_miles": "mi",
+    "distance_stdev_miles": "mi",
 }
 
 # Flattened-path keys that are real values but never citable in a rationale's

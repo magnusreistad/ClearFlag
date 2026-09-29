@@ -1,7 +1,8 @@
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from statistics import mean, stdev
+from typing import Any
 
 from app.models import Transaction
 
@@ -39,6 +40,33 @@ MIN_STD_DEV_FLOOR_MILES = 10.0
 class RuleHit:
     transaction_id: int
     rationale: str
+    # SCRUM-68: location_label is the entity the rationale prose already
+    # cites; distance_miles/distance_mean_miles/distance_stdev_miles aren't
+    # in the rationale string today, but are the exact figures this hit was
+    # computed from (distance_miles is this transaction's own distance from
+    # centroid; the mean/stdev pair is the historical distribution it was
+    # compared against, distance_stdev_miles already including
+    # MIN_STD_DEV_FLOOR_MILES) -- structural facts an Investigation Agent
+    # composed rationale can cite even though the interim formatter doesn't.
+    #
+    # An earlier version of this comment excluded distance_miles because it
+    # numerically coincides with what get_geo_distance (SCRUM-50, this
+    # rule's mapped tool) returns as evidence["distance_miles"] -- both
+    # compute the same great-circle distance over the same prior-history
+    # set, deliberately, to avoid drift (see get_geo_distance's own
+    # docstring). That's restored: a value the rule itself already computed
+    # is a legitimate payload fact per the Investigation Agent Design Doc
+    # (SS5 -- citable is "payload OR tool output", not "tool output only
+    # when a rule also happens to compute it"). "No tool call, no citation"
+    # governs facts ONLY a tool produces -- e.g. get_geo_distance's
+    # typical_location_label and distance_km, which this rule never
+    # computes; see TestErroredToolNotCitable in
+    # tests/test_investigation_agent_validation.py, rewritten to exercise
+    # those instead of distance_miles.
+    #
+    # No new computation: every value here is a local variable already
+    # produced below.
+    values: dict[str, Any] = field(default_factory=dict)
 
 
 def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -120,6 +148,12 @@ def evaluate_geographic_anomaly(
                         f"Flagged: This transaction occurred in {t.location_label}, "
                         f"far from where you usually shop."
                     ),
+                    values={
+                        "location_label": t.location_label,
+                        "distance_miles": current_distance,
+                        "distance_mean_miles": historical_mean,
+                        "distance_stdev_miles": historical_stdev,
+                    },
                 )
             )
 

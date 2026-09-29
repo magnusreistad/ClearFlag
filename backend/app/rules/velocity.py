@@ -1,6 +1,7 @@
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import Any
 
 from app.models import Transaction
 
@@ -15,6 +16,11 @@ DEFAULT_WINDOW_MINUTES = 10
 class RuleHit:
     transaction_id: int
     rationale: str
+    # SCRUM-68: the same numbers rationale bakes into prose, exposed
+    # structurally so an Investigation Agent payload can cite them. No value
+    # here is computed for this field alone -- both keys are already local
+    # variables the rationale f-string below reads from.
+    values: dict[str, Any] = field(default_factory=dict)
 
 
 def evaluate_velocity(
@@ -57,6 +63,10 @@ def evaluate_velocity(
                 f"in {window_minutes} minutes, which is unusual for your "
                 f"account."
             ),
+            values={
+                "transaction_count": best_count_by_id[t.id],
+                "window_minutes": window_minutes,
+            },
         )
         for t in ordered
         if t.id in best_count_by_id

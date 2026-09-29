@@ -1,5 +1,5 @@
 {
-  "_source": "Real investigation_graph.invoke() run against the Neon dev branch for transaction 843 (Meridian Duty-Free Traders, SCRUM-65's planted triple-rule fraud, seeded user_id 2), captured 2026-09-29 for SCRUM-52. amount_deviation's category_mean/category_stdev were captured by independently replicating app.rules.amount_deviation's own history walk for this transaction's category (shopping) as of its timestamp -- the rules engine doesn't expose these structurally yet (see validation.py's payload-shape docstring); everything else here is exactly what the graph itself returned, unmodified.",
+  "_source": "Real investigation_graph.invoke() run against the Neon dev branch for transaction 843 (Meridian Duty-Free Traders, SCRUM-65's planted triple-rule fraud, seeded user_id 2), captured 2026-09-29 for SCRUM-68. payload.rules comes from a real evaluate_all_rules() run over this user's full history (app.rules.engine.rule_values_by_transaction) -- no replicated/independent history-walk computation. evidence/tool_errors are exactly what investigation_graph itself returned, unmodified.",
   "payload": {
     "transaction": {
       "id": 843,
@@ -11,23 +11,29 @@
       "latitude": 14.5995,
       "longitude": 120.9842
     },
-    "rule_names": ["new_merchant_risk", "amount_deviation", "geographic_anomaly"],
+    "rule_names": ["geographic_anomaly", "amount_deviation", "new_merchant_risk"],
     "rules": {
+      "geographic_anomaly": {
+        "location_label": "Manila, Philippines",
+        "distance_miles": 6750.823956517019,
+        "distance_mean_miles": 209.35920399831326,
+        "distance_stdev_miles": 793.7444239056688
+      },
       "amount_deviation": {
         "amount": "3200.00",
         "category_mean": "162.2013333333333333333333333",
-        "category_stdev": "411.1724170922354859218446882"
+        "category_stdev": "411.1724170922354859218446882",
+        "percent_above_mean": "1872.856778818094384756393290"
+      },
+      "new_merchant_risk": {
+        "amount": "3200.00",
+        "typical_first_purchase_mean": "107.8462745098039215686274510",
+        "typical_first_purchase_stdev": "322.9325560420366431762533125",
+        "percent_above_mean": "2867.186409122643704910402606"
       }
     }
   },
   "evidence": {
-    "get_merchant_risk_score": {
-      "user_id": 2,
-      "merchant": "Meridian Duty-Free Traders",
-      "is_first_transaction": true,
-      "prior_transaction_count": 0,
-      "risk_tier": null
-    },
     "get_geo_distance": {
       "user_id": 2,
       "latitude": 14.5995,
@@ -35,6 +41,13 @@
       "distance_km": 10864.398029476926,
       "distance_miles": 6750.823956517019,
       "typical_location_label": "Seattle, WA"
+    },
+    "get_merchant_risk_score": {
+      "user_id": 2,
+      "merchant": "Meridian Duty-Free Traders",
+      "is_first_transaction": true,
+      "prior_transaction_count": 0,
+      "risk_tier": null
     }
   },
   "tool_errors": {}

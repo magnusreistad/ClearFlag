@@ -163,3 +163,33 @@ def test_rationale_uses_actual_count_not_threshold():
         assert "8 transactions" in h.rationale
         assert "5 transactions" not in h.rationale
         assert "in 10 minutes" in h.rationale
+
+
+def test_rationale_is_byte_identical_to_the_pre_scrum_68_format():
+    """SCRUM-68 snapshot: adding RuleHit.values must not change a single
+    character of the rationale string this rule has always produced."""
+    db = TestingSessionLocal()
+    user_id = new_user(db)
+    txns = create_transactions(db, user_id, [0, 2, 4, 6, 8, 10])
+    db.close()
+
+    hits = evaluate_velocity(txns, max_count=5, window_minutes=10)
+
+    assert hits[0].rationale == (
+        "Flagged: You made 6 transactions in 10 minutes, which is unusual "
+        "for your account."
+    )
+
+
+def test_values_populated_with_expected_keys_and_correct_figures():
+    """SCRUM-68: values must carry exactly the two numbers the rationale
+    string is built from."""
+    db = TestingSessionLocal()
+    user_id = new_user(db)
+    txns = create_transactions(db, user_id, [0, 2, 4, 6, 8, 10])
+    db.close()
+
+    hits = evaluate_velocity(txns, max_count=5, window_minutes=10)
+
+    for h in hits:
+        assert h.values == {"transaction_count": 6, "window_minutes": 10}

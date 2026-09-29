@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from statistics import mean, stdev
 
 import pytest
 from sqlalchemy import create_engine
@@ -204,6 +205,44 @@ def test_unsorted_input_still_correct():
 
 def test_empty_transaction_list_returns_empty():
     assert evaluate_amount_deviation([]) == []
+
+
+def test_rationale_is_byte_identical_to_the_pre_scrum_68_format():
+    """SCRUM-68 snapshot: adding RuleHit.values must not change a single
+    character of the rationale string this rule has always produced."""
+    db = TestingSessionLocal()
+    user_id = new_user(db)
+    txns = create_transactions(db, user_id, [*HISTORY, Decimal("540.00")])
+    db.close()
+
+    hits = evaluate_amount_deviation(txns)
+
+    assert hits[0].rationale == (
+        "Flagged: This amount is 777% higher than your typical spend in this category."
+    )
+
+
+def test_values_populated_with_expected_keys_and_correct_figures():
+    """SCRUM-68: values must carry exactly the numbers the rationale string
+    is built from (amount, category_mean, category_stdev, percent_above_mean),
+    computed the same way -- verified against statistics.mean/stdev directly
+    rather than hand-typed, so this can't silently drift from the rule."""
+    db = TestingSessionLocal()
+    user_id = new_user(db)
+    txns = create_transactions(db, user_id, [*HISTORY, Decimal("540.00")])
+    db.close()
+
+    hits = evaluate_amount_deviation(txns)
+
+    expected_mean = mean(HISTORY)
+    expected_stdev = stdev(HISTORY)  # already above MIN_STD_DEV_FLOOR, so the floor is inert
+    expected_pct = (Decimal("540.00") - expected_mean) / expected_mean * 100
+    assert hits[0].values == {
+        "amount": Decimal("540.00"),
+        "category_mean": expected_mean,
+        "category_stdev": expected_stdev,
+        "percent_above_mean": expected_pct,
+    }
 
 
 def test_custom_threshold_narrows_what_flags():

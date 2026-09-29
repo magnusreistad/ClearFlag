@@ -6,11 +6,17 @@ and the validator must check the model's number against the exact same
 formula the model was told to use, not a re-derivation that could drift from
 it.
 
-Start small: the only derived value the interim formatter (app.rules.
-amount_deviation / app.rules.new_merchant_risk) currently computes is
-"percent above the category mean" for an amount_deviation flag. Add more
-functions here as later rules' formatters gain their own computed values --
-never let the validator or the prompt hand-roll a formula that belongs here.
+SCRUM-68: app.rules.amount_deviation now exposes percent_above_mean
+structurally on RuleHit.values (computed with this exact formula), so
+compute_derived_facts below reads that value through rather than
+recomputing it -- kept as a "derived" entry, not deleted, so validation.py's
+existing "derived.*" flattening path and payload consumers don't need to
+change shape. percent_above_category_mean itself stays here as the
+canonical formula: still exercised directly by tests, and available for a
+future rule/derived value that needs the same ratio but doesn't expose it on
+RuleHit.values itself (app.rules.new_merchant_risk now exposes its own
+percent_above_mean directly on RuleHit.values too, so it needs no entry
+here).
 """
 
 from decimal import Decimal
@@ -35,19 +41,14 @@ def compute_derived_facts(payload: dict[str, Any]) -> dict[str, dict[str, Decima
 
     Silently omits a rule's derived facts if that rule's raw inputs aren't
     present in `payload["rules"]` (e.g. the rule didn't fire this
-    invocation) or if category_mean is zero (percent-above-mean is
-    undefined) -- never fabricates a value from missing or degenerate
-    inputs.
+    invocation) -- never fabricates a value from missing inputs.
     """
     derived: dict[str, dict[str, Decimal]] = {}
 
     amount_deviation = payload.get("rules", {}).get("amount_deviation")
     if amount_deviation is not None:
-        amount = amount_deviation.get("amount")
-        category_mean = amount_deviation.get("category_mean")
-        if amount is not None and category_mean:
-            derived["amount_deviation"] = {
-                "percent_above_mean": percent_above_category_mean(amount, category_mean)
-            }
+        percent_above_mean = amount_deviation.get("percent_above_mean")
+        if percent_above_mean is not None:
+            derived["amount_deviation"] = {"percent_above_mean": percent_above_mean}
 
     return derived

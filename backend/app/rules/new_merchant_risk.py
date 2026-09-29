@@ -1,7 +1,8 @@
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from statistics import mean, stdev
+from typing import Any
 
 from app.models import Transaction
 
@@ -29,6 +30,15 @@ MIN_STD_DEV_FLOOR = Decimal("1.00")
 class RuleHit:
     transaction_id: int
     rationale: str
+    # SCRUM-68: structural counterpart to the rationale prose. Named
+    # typical_first_purchase_mean/_stdev rather than reusing amount_
+    # deviation's category_mean/category_stdev keys -- this historical mean
+    # is across first-time purchases at distinct merchants, not a spend
+    # category, and reusing those key names would mislabel it (see
+    # validation.py's _UNIT_BY_KEY for the unit mapping this needs). No new
+    # computation: every value here is a local variable already produced
+    # below.
+    values: dict[str, Any] = field(default_factory=dict)
 
 
 def evaluate_new_merchant_risk(
@@ -85,6 +95,12 @@ def evaluate_new_merchant_risk(
                         f"and the amount is {pct_higher:.0f}% higher than your "
                         f"typical first-time purchase."
                     ),
+                    values={
+                        "amount": t.amount,
+                        "typical_first_purchase_mean": historical_mean,
+                        "typical_first_purchase_stdev": historical_stdev,
+                        "percent_above_mean": pct_higher,
+                    },
                 )
             )
 

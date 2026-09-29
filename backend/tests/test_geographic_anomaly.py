@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from statistics import mean, stdev
 
 import pytest
 from sqlalchemy import create_engine
@@ -8,7 +9,12 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import Transaction, User
-from app.rules.geographic_anomaly import evaluate_geographic_anomaly
+from app.rules.geographic_anomaly import (
+    MIN_STD_DEV_FLOOR_MILES,
+    _centroid,
+    _haversine_miles,
+    evaluate_geographic_anomaly,
+)
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -146,6 +152,38 @@ def test_rationale_uses_location_label():
     assert hits[0].rationale == (
         "Flagged: This transaction occurred in Portland, OR, far from where you usually shop."
     )
+
+
+def test_values_populated_with_expected_keys_and_correct_figures():
+    """SCRUM-68: values carries location_label (the entity the rationale
+    string cites) plus distance_miles/distance_mean_miles/distance_stdev_miles
+    -- this hit's own distance and the historical distribution it was
+    compared against -- verified against _centroid/_haversine_miles/stdev
+    directly rather than hand-typed. distance_miles is a legitimate payload
+    fact even though get_geo_distance (this rule's mapped tool) computes the
+    same figure as evidence -- see RuleHit.values' comment; TestErroredToolNotCitable
+    in tests/test_investigation_agent_validation.py covers facts that stay
+    tool-only (typical_location_label, distance_km)."""
+    db = TestingSessionLocal()
+    user_id = new_user(db)
+    history = create_metro_history(db, user_id)
+    candidate = add_transaction(db, user_id, len(history), 45.5152, -122.6784, "Portland, OR")
+    db.close()
+
+    hits = evaluate_geographic_anomaly([*history, candidate])
+
+    centroid_lat, centroid_lon = _centroid(history)
+    historical_distances = [_haversine_miles(centroid_lat, centroid_lon, h.latitude, h.longitude) for h in history]
+    expected_current_distance = _haversine_miles(centroid_lat, centroid_lon, candidate.latitude, candidate.longitude)
+    expected_mean = mean(historical_distances)
+    expected_stdev = max(stdev(historical_distances), MIN_STD_DEV_FLOOR_MILES)
+
+    assert hits[0].values == {
+        "location_label": "Portland, OR",
+        "distance_miles": expected_current_distance,
+        "distance_mean_miles": expected_mean,
+        "distance_stdev_miles": expected_stdev,
+    }
 
 
 def test_too_few_historical_locations_does_not_flag():
