@@ -29,7 +29,8 @@ from scripts.seed_transactions import generate_triple_rule_fraud
 # here to the Investigation Agent's own SessionLocal (app.database.SessionLocal,
 # imported into graph.py at module scope) since get_transaction_history opens
 # its own session rather than taking one as a FastAPI-injected dependency --
-# there's no request-scoped session to override yet (that's SCRUM-53).
+# there's no request-scoped session to override yet -- this graph still
+# isn't wired into the live FastAPI request path.
 engine = create_engine(
     "sqlite:///:memory:",
     connect_args={"check_same_thread": False},
@@ -107,7 +108,15 @@ def test_scrum_65_triple_rule_transaction_fans_out_to_its_two_mapped_tool_branch
     assert result["evidence"]["get_merchant_risk_score"]["merchant"] == "Meridian Duty-Free Traders"
     assert result["evidence"]["get_geo_distance"]["latitude"] == seed_transaction.latitude
     assert result["tool_errors"] == {}
-    assert result["rationale"] == ""  # assemble_rationale is a no-op placeholder until SCRUM-53
+    # compose_rationale/validate (SCRUM-53) still run for every path, including this one -- but
+    # this state has no rule_values, so get_chat_model()'s default mock response (which cites
+    # nothing) is what validate sees, and it's discarded here for an unrelated reason: the
+    # bracketed "[MOCK]" token trips the SCRUM-53 bare-entity check. Either way the composed
+    # rationale never survives validation with this deliberately underspecified state, which is
+    # exactly what this test (about tool routing, not composition) wants: an empty final
+    # rationale and rationale_source="interim", not a crash.
+    assert result["rationale"] == ""
+    assert result["rationale_source"] == "interim"
 
 
 def test_velocity_only_flag_visits_get_transaction_history_branch():
@@ -141,15 +150,17 @@ def test_velocity_only_flag_visits_get_transaction_history_branch():
     assert result["tool_errors"] == {}
 
 
-def test_amount_deviation_only_flag_has_no_tool_and_routes_straight_to_assemble():
+def test_amount_deviation_only_flag_has_no_tool_and_routes_straight_to_collect_evidence():
     """amount_deviation maps to no tool (SCRUM-51) -- its evidence already
     comes from the rules engine, not a tool call, so a flag triggered by
-    only that rule should reach assemble_rationale with no evidence
-    gathered rather than being routed nowhere. plan_tool_calls still emits
-    an AIMessage (with an empty tool_calls list); tools_condition reads
-    that and routes straight past the "tools" node to assemble_rationale --
+    only that rule should reach collect_evidence with no evidence gathered
+    rather than being routed nowhere. plan_tool_calls still emits an
+    AIMessage (with an empty tool_calls list); tools_condition reads that
+    and routes straight past the "tools" node to collect_evidence --
     confirmed here by there being exactly one message (plan_tool_calls's)
-    and zero ToolMessages, proving ToolNode never ran.
+    and zero ToolMessages, proving ToolNode never ran. See
+    test_investigation_agent_compose.py's TestNoToolCompositionStillRuns for
+    this same no-tool path continuing on into compose_rationale/validate.
     """
     state: InvestigationState = {
         "transaction": {
@@ -238,7 +249,7 @@ class TestPlanToolCalls:
 def test_tool_exception_is_isolated_and_recorded_in_tool_errors(monkeypatch):
     """SCRUM-51 groundwork for SCRUM-56 (not the fallback itself): ToolNode
     is configured with handle_tool_errors=True, so a tool raising becomes an
-    error ToolMessage instead of crashing the graph. assemble_rationale
+    error ToolMessage instead of crashing the graph. collect_evidence
     records that in tool_errors (keyed by tool name) and leaves the failed
     tool's evidence key absent entirely -- never a substitute value. The
     OTHER tool call in the same parallel batch (get_merchant_risk_score)

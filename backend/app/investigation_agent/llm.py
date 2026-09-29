@@ -42,6 +42,23 @@ def _is_truthy(value: str) -> bool:
     return value.strip().lower() not in ("", "false", "0", "no")
 
 
+def current_model_id() -> str:
+    """The model identifier get_chat_model() would construct right now, without actually
+    constructing a client (SCRUM-53: for LangSmith trace metadata --
+    app.investigation_agent.tracing -- attached to a graph run's config before the run starts,
+    since a run's initial metadata can't be amended once nodes are already executing).
+
+    Doesn't validate INVESTIGATION_AGENT_LLM_MODE the way get_chat_model() does -- an invalid
+    mode still gets a label here (the mode string itself), since this is only ever used for a
+    trace's human-readable tag; get_chat_model() remains the sole place that actually raises on
+    a bad config.
+    """
+    mode = os.getenv("INVESTIGATION_AGENT_LLM_MODE", "mock").strip().lower() or "mock"
+    if mode != "live":
+        return mode
+    return os.getenv("INVESTIGATION_AGENT_LLM_MODEL", DEFAULT_MODEL)
+
+
 def get_chat_model(*, responses: Iterator[AIMessage | str] | None = None) -> BaseChatModel:
     """Build the chat model for this process, per INVESTIGATION_AGENT_LLM_MODE.
 

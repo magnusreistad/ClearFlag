@@ -1,0 +1,186 @@
+{
+  "_source": "Real investigation_graph.invoke() runs (INVESTIGATION_AGENT_LLM_MODE=live) against the Neon dev branch, captured for SCRUM-53's Phase A live check baseline (re-run after an earlier transient Anthropic 5xx). Reference data for validator tuning and SCRUM-54 -- not used by any test as of this capture.",
+  "captured_prompt_version": "v1",
+  "entries": [
+    {
+      "transaction_id": 843,
+      "label": "Meridian 843 (three-rule)",
+      "fired_rules": [
+        "geographic_anomaly",
+        "amount_deviation",
+        "new_merchant_risk"
+      ],
+      "payload": {
+        "transaction": {
+          "id": 843,
+          "user_id": 2,
+          "merchant": "Meridian Duty-Free Traders",
+          "category": "shopping",
+          "amount": "3200.00",
+          "location_label": "Manila, Philippines",
+          "latitude": 14.5995,
+          "longitude": 120.9842
+        },
+        "rule_names": [
+          "geographic_anomaly",
+          "amount_deviation",
+          "new_merchant_risk"
+        ],
+        "rules": {
+          "geographic_anomaly": {
+            "location_label": "Manila, Philippines",
+            "distance_miles": 6750.823956517019,
+            "distance_mean_miles": 209.35920399831326,
+            "distance_stdev_miles": 793.7444239056688
+          },
+          "amount_deviation": {
+            "amount": "3200.00",
+            "category_mean": "162.2013333333333333333333333",
+            "category_stdev": "411.1724170922354859218446882",
+            "percent_above_mean": "1872.856778818094384756393290"
+          },
+          "new_merchant_risk": {
+            "amount": "3200.00",
+            "typical_first_purchase_mean": "107.8462745098039215686274510",
+            "typical_first_purchase_stdev": "322.9325560420366431762533125",
+            "percent_above_mean": "2867.186409122643704910402606"
+          }
+        }
+      },
+      "evidence": {
+        "get_geo_distance": {
+          "user_id": 2,
+          "latitude": 14.5995,
+          "longitude": 120.9842,
+          "distance_km": 10864.398029476926,
+          "distance_miles": 6750.823956517019,
+          "typical_location_label": "Seattle, WA"
+        },
+        "get_merchant_risk_score": {
+          "user_id": 2,
+          "merchant": "Meridian Duty-Free Traders",
+          "is_first_transaction": true,
+          "prior_transaction_count": 0,
+          "risk_tier": null
+        }
+      },
+      "derived": {
+        "amount_deviation": {
+          "percent_above_mean": "1872.856778818094384756393290"
+        }
+      },
+      "rationale": "This $3,200 purchase at Meridian Duty-Free Traders stood out in three ways. It's about 1,873% above your typical shopping spend of roughly $162. It took place in Manila, Philippines, about 6,751 miles from your usual location of Seattle, WA, while your transactions typically happen only around 209 miles from it. It was also your first purchase ever at this merchant, and first purchases for you usually average around $108.",
+      "char_count": 425,
+      "rationale_source": "agent",
+      "violations": [],
+      "composition_error": null,
+      "tool_errors": {},
+      "latency_seconds": 3.35,
+      "model_id": "claude-sonnet-5-5",
+      "prompt_version": "v1",
+      "trace_url": "https://smith.langchain.com/o/faaaab37-a64c-4313-866b-46fdaf25496d/projects/p/cbc48ea1-f23b-4c3a-8935-8d47e3ab7f19/r/b05ccff1-53a2-4844-ba06-34d32d9b22df?trace_id=b05ccff1-53a2-4844-ba06-34d32d9b22df&start_time=2026-09-29T14:53:56.925277"
+    },
+    {
+      "transaction_id": 832,
+      "label": "Single-rule (geographic_anomaly)",
+      "fired_rules": [
+        "geographic_anomaly"
+      ],
+      "payload": {
+        "transaction": {
+          "id": 832,
+          "user_id": 2,
+          "merchant": "Whole Foods Market",
+          "category": "groceries",
+          "amount": "76.37",
+          "location_label": "Bangkok, Thailand",
+          "latitude": 13.7563,
+          "longitude": 100.5018
+        },
+        "rule_names": [
+          "geographic_anomaly"
+        ],
+        "rules": {
+          "geographic_anomaly": {
+            "location_label": "Bangkok, Thailand",
+            "distance_miles": 7444.214706291237,
+            "distance_mean_miles": 2.4148410400523423,
+            "distance_stdev_miles": 10.0
+          }
+        }
+      },
+      "evidence": {
+        "get_geo_distance": {
+          "user_id": 2,
+          "latitude": 13.7563,
+          "longitude": 100.5018,
+          "distance_km": 11980.302272281566,
+          "distance_miles": 7444.214706291237,
+          "typical_location_label": "Seattle, WA"
+        }
+      },
+      "derived": {},
+      "rationale": "This $76.37 Whole Foods Market grocery purchase was flagged because it took place in Bangkok, Thailand, about 7,444.2 miles from your typical location of Seattle, WA. Your purchases are usually only about 2.4 miles from that spot, so a charge this far away stands out sharply from your normal pattern. If this was you, no action is needed. If not, please review your account.",
+      "char_count": 375,
+      "rationale_source": "agent",
+      "violations": [],
+      "composition_error": null,
+      "tool_errors": {},
+      "latency_seconds": 2.15,
+      "model_id": "claude-sonnet-5-5",
+      "prompt_version": "v1",
+      "trace_url": "https://smith.langchain.com/o/faaaab37-a64c-4313-866b-46fdaf25496d/projects/p/cbc48ea1-f23b-4c3a-8935-8d47e3ab7f19/r/962eb6b2-5967-4cc6-aa2b-7fabb457a97b?trace_id=962eb6b2-5967-4cc6-aa2b-7fabb457a97b&start_time=2026-09-29T14:54:01.594932"
+    },
+    {
+      "transaction_id": 833,
+      "label": "Single-rule (geographic_anomaly)",
+      "fired_rules": [
+        "geographic_anomaly"
+      ],
+      "payload": {
+        "transaction": {
+          "id": 833,
+          "user_id": 2,
+          "merchant": "Chipotle Mexican Grill",
+          "category": "dining",
+          "amount": "4.00",
+          "location_label": "Lagos, Nigeria",
+          "latitude": 6.5244,
+          "longitude": 3.3792
+        },
+        "rule_names": [
+          "geographic_anomaly"
+        ],
+        "rules": {
+          "geographic_anomaly": {
+            "location_label": "Lagos, Nigeria",
+            "distance_miles": 7355.961403104672,
+            "distance_mean_miles": 229.15346472906415,
+            "distance_stdev_miles": 834.8078781913823
+          }
+        }
+      },
+      "evidence": {
+        "get_geo_distance": {
+          "user_id": 2,
+          "latitude": 6.5244,
+          "longitude": 3.3792,
+          "distance_km": 11838.272348318087,
+          "distance_miles": 7355.961403104672,
+          "typical_location_label": "Seattle, WA"
+        }
+      },
+      "derived": {},
+      "rationale": "This $4.00 dining charge at Chipotle Mexican Grill was flagged because of where it happened. It was made in Lagos, Nigeria, about 7,356 miles from your typical location of Seattle, WA. Your purchases usually happen around 229 miles from that spot, give or take about 835 miles, so this one is far outside your normal pattern. The amount is small, but the location is very unusual for you.",
+      "char_count": 388,
+      "rationale_source": "agent",
+      "violations": [],
+      "composition_error": null,
+      "tool_errors": {},
+      "latency_seconds": 2.13,
+      "model_id": "claude-sonnet-5-5",
+      "prompt_version": "v1",
+      "trace_url": "https://smith.langchain.com/o/faaaab37-a64c-4313-866b-46fdaf25496d/projects/p/cbc48ea1-f23b-4c3a-8935-8d47e3ab7f19/r/09435896-7f73-4b88-ba95-a7f2939a467b?trace_id=09435896-7f73-4b88-ba95-a7f2939a467b&start_time=2026-09-29T14:54:07.834472"
+    }
+  ]
+}

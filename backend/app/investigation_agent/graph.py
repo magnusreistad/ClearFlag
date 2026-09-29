@@ -15,10 +15,17 @@ plan_tool_calls builds that AIMessage in code from RULE_TOOL_NODES; ToolNode
 just executes whatever tool_calls it's handed. No LLM, no API key, no
 network call anywhere in this module.
 
-Not wired into the live FastAPI request path yet (that's SCRUM-53). The
-interim formatter in app.rules.engine (concatenate_rationales) stays the
-`rationale` field's source until then, and remains in the codebase
-afterward as the on-failure fallback path (SCRUM-56).
+SCRUM-53 adds the rest of the pipeline -- collect_evidence (renamed from
+assemble_rationale, mapping unchanged) -> compose_rationale (asks the model,
+via app.investigation_agent.llm.get_chat_model, to compose one rationale
+from build_payload()+evidence+derived facts) -> validate (SCRUM-52's
+validate_rationale as the final citation gate) -- but still doesn't wire
+this graph into the live FastAPI request path itself; that's a separate,
+not-yet-approved integration decision. The interim formatter in
+app.rules.engine (concatenate_rationales) remains in the codebase as the
+fallback whenever compose_rationale/validate don't produce a trustworthy
+rationale (rationale_source="interim" -- SCRUM-56 owns what a caller does
+with that signal).
 """
 
 from collections import Counter
@@ -31,7 +38,16 @@ from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.database import SessionLocal
+from app.investigation_agent.derived_facts import compute_derived_facts
+from app.investigation_agent.llm import get_chat_model
+from app.investigation_agent.payload import build_payload
+from app.investigation_agent.prompts import build_prompt
 from app.investigation_agent.state import InvestigationState, TransactionData
+from app.investigation_agent.tracing import (
+    enforce_no_tracing_in_ci,
+    invoke_investigation_graph,
+)
+from app.investigation_agent.validation import validate_rationale
 from app.models import Transaction
 from app.rules.geographic_anomaly import MIN_HISTORY_COUNT, _centroid, _haversine_miles
 from app.rules.velocity import DEFAULT_WINDOW_MINUTES
@@ -44,7 +60,7 @@ KM_PER_MILE = 1.609344
 
 # SCRUM-51: which tool each rule's evidence comes from -- the single source
 # of truth both plan_tool_calls (which tool_calls to build) and
-# assemble_rationale (comment below) rely on. amount_deviation has no entry:
+# collect_evidence (comment below) rely on. amount_deviation has no entry:
 # its values (mean, stdev, actual amount) are already computed by the rules
 # engine and passed in the invocation payload, so it needs no tool call.
 RULE_TOOL_NODES: dict[str, str] = {
@@ -76,12 +92,12 @@ def get_transaction_history(
 
     Opens its own session via SessionLocal (module-level, so tests can
     monkeypatch it) rather than taking a `db` parameter: this tool isn't on
-    the FastAPI request path yet (that's SCRUM-53), so there's no
-    request-scoped session to inject.
+    the FastAPI request path yet, so there's no request-scoped session to
+    inject.
 
     response_format="content_and_artifact" (SCRUM-51): `content` is a short
     string for the trace, `artifact` is the same structured evidence dict
-    this returned pre-SCRUM-51 -- assemble_rationale reads the artifact back
+    this returned pre-SCRUM-51 -- collect_evidence reads the artifact back
     into state["evidence"]["get_transaction_history"] unchanged, so nothing
     downstream re-parses a JSON string.
     """
@@ -319,22 +335,28 @@ def plan_tool_calls(state: InvestigationState) -> dict:
     return {"messages": [AIMessage(content="", tool_calls=tool_calls)]}
 
 
-def assemble_rationale(state: InvestigationState) -> dict:
-    """Terminal node every branch converges on.
+def collect_evidence(state: InvestigationState) -> dict:
+    """SCRUM-53: renamed from assemble_rationale, mapping unchanged -- this
+    node's job is now purely gathering evidence out of the message log, not
+    also standing in as a rationale placeholder. compose_rationale (below)
+    is what actually produces `rationale` now, and this node no longer
+    writes that key at all.
 
     SCRUM-51: maps ToolNode's output -- ToolMessages appended to
-    state["messages"] -- back into the same per-tool `evidence` keys the
-    state used before ToolNode existed, so SCRUM-53's contract doesn't
-    change. A ToolMessage with status == "error" (see build_graph's
-    handle_tool_errors=True) means that tool call raised; its failure is
-    recorded in tool_errors keyed by tool name and its evidence key is left
-    absent entirely -- never populated with a substitute value (Design Doc:
-    never fabricate). Parallel tool calls fail independently: one tool
-    erroring doesn't prevent another's evidence from landing here.
+    state["messages"] -- into the per-tool `evidence` keys the rest of the
+    graph (and the Investigation Agent Design Doc's payload/evidence
+    contract) expects. A ToolMessage with status == "error" (see
+    build_graph's handle_tool_errors=True) means that tool call raised; its
+    failure is recorded in tool_errors keyed by tool name and its evidence
+    key is left absent entirely -- never populated with a substitute value
+    (Design Doc: never fabricate). Parallel tool calls fail independently:
+    one tool erroring doesn't prevent another's evidence from landing here.
 
-    Rationale composition itself is still a no-op placeholder -- SCRUM-53
-    fills that in, superseding the interim formatter as the primary source
-    for the `rationale` field.
+    Every branch converges here, including the no-tool amount_deviation-only
+    path (plan_tool_calls's empty tool_calls list routes tools_condition
+    straight past ToolNode) -- state["messages"] then has no ToolMessages at
+    all, so both dicts come back empty, which is correct: there's nothing to
+    map.
     """
     evidence: dict[str, dict] = {}
     tool_errors: dict[str, str] = {}
@@ -346,37 +368,154 @@ def assemble_rationale(state: InvestigationState) -> dict:
         else:
             evidence[message.name] = message.artifact
 
-    return {"evidence": evidence, "tool_errors": tool_errors, "rationale": ""}
+    return {"evidence": evidence, "tool_errors": tool_errors}
+
+
+def compose_rationale(state: InvestigationState) -> dict:
+    """SCRUM-53. Builds this invocation's citable facts -- build_payload()
+    (the flagged transaction's own snapshot plus each fired rule's own
+    RuleHit.values, SCRUM-68) combined with evidence (collect_evidence's
+    output) and compute_derived_facts() (SCRUM-52's pre-computed derivations,
+    e.g. amount_deviation's percent_above_mean) -- and asks the model, via
+    get_chat_model() (SCRUM-55; the ONLY place this graph ever constructs a
+    chat model), to compose one coherent rationale addressing every fired
+    rule. The model is shown exactly these facts as structured JSON (see
+    app.investigation_agent.prompts.build_prompt) and nothing else -- no
+    database access, no other context.
+
+    Never retries and never crashes the graph on a model-call failure
+    (timeout, API error, ...): SCRUM-56 owns retries and structured failure
+    logging. The exception is recorded in composition_error and `rationale`
+    is left empty, which validate (below) then correctly fails as an
+    empty_rationale violation -- there is no separate "model failed" branch
+    in the graph, because an empty rationale already routes to the same
+    rationale_source="interim" outcome a validation failure would.
+
+    enforce_no_tracing_in_ci() runs here, not only in the optional
+    invoke_investigation_graph wrapper (app.investigation_agent.tracing):
+    this is the one place in the graph that can start a trace at all (the
+    model call below), and tests/callers that invoke investigation_graph
+    directly -- bypassing that wrapper -- must still never make a tracing
+    network call in CI.
+    """
+    enforce_no_tracing_in_ci()
+
+    transaction = state["transaction"]
+    payload = build_payload(transaction, state["rule_names"], state.get("rule_values", {}))
+    evidence = state.get("evidence", {})
+    derived = compute_derived_facts(payload)
+
+    prompt = build_prompt(payload, evidence, derived)
+
+    try:
+        model = get_chat_model()
+        response = model.invoke(prompt)
+        # SCRUM-53 Phase A live check: a live model can return `content` as a
+        # list of content blocks rather than a plain string -- e.g. an
+        # extended-thinking block alongside the actual text block -- and
+        # `str(response.content)` on that list stringifies the WHOLE list,
+        # thinking block (and its large base64 signature) included, as the
+        # "rationale". `.text` is AIMessage's own accessor for exactly this:
+        # it extracts and concatenates only the text-type blocks, and still
+        # returns a plain string unchanged when content already was one.
+        content = response.text
+    except Exception as exc:  # noqa: BLE001 -- SCRUM-53: never crash the graph on a model failure; SCRUM-56 owns retries/logging.
+        return {"rationale": "", "composed_rationale": "", "composition_error": str(exc)}
+
+    stripped = content.strip()
+    # composed_rationale (SCRUM-53 follow-up) is the audit record of what
+    # was actually produced this run -- written here and never touched by
+    # validate() below, unlike `rationale`, which validate overwrites to ""
+    # on a failed validation. See InvestigationState's docstring.
+    return {"rationale": stripped, "composed_rationale": stripped, "composition_error": None}
+
+
+def validate(state: InvestigationState) -> dict:
+    """SCRUM-53. The final gate before a composed rationale is trusted:
+    SCRUM-52's validate_rationale() re-derives the exact same citable facts
+    compose_rationale showed the model (same build_payload + evidence
+    inputs) and checks the composed `rationale` against them.
+
+    On pass, state carries the composed rationale unchanged with
+    rationale_source="agent". On failure -- including the case where
+    compose_rationale already recorded a composition_error and left
+    `rationale` empty, which always fails here as empty_rationale --
+    the composed rationale is discarded entirely (never repaired or
+    partially accepted, per the Design Doc) and rationale_source="interim",
+    so a caller falls back to the interim formatter's output (SCRUM-56).
+    violations is kept in state either way (empty on a pass) for that
+    caller's failure logging. Deliberately never returns/touches
+    composed_rationale: that key is compose_rationale's own audit record of
+    what was actually produced, and must survive a failed validation
+    unchanged (see InvestigationState's docstring) -- this function only
+    ever discards/keeps `rationale`, the "safe to serve" value.
+    """
+    transaction = state["transaction"]
+    payload = build_payload(transaction, state["rule_names"], state.get("rule_values", {}))
+    evidence = state.get("evidence", {})
+    rationale = state.get("rationale", "")
+
+    result = validate_rationale(rationale, payload, evidence)
+
+    if result.passed:
+        return {"rationale": rationale, "rationale_source": "agent", "violations": []}
+    return {"rationale": "", "rationale_source": "interim", "violations": result.violations}
 
 
 def build_graph() -> StateGraph:
+    """SCRUM-53 target shape: plan_tool_calls -> tools_condition ->
+    ToolNode -> collect_evidence -> compose_rationale -> validate -> END.
+    The no-tool path (tools_condition's "__end__" branch, e.g. an
+    amount_deviation-only flag) also lands on collect_evidence rather than
+    skipping straight to composition -- there is exactly one path into
+    compose_rationale, tool-branch or not.
+    """
     graph = StateGraph(InvestigationState)
 
     graph.add_node("route_entry", route_entry)
     graph.add_node("plan_tool_calls", plan_tool_calls)
     # handle_tool_errors=True (SCRUM-51 groundwork for SCRUM-56): turns any
     # exception raised inside a tool into an error ToolMessage instead of
-    # crashing the graph, so assemble_rationale can record it in
-    # tool_errors. The langgraph default only catches invalid-arguments
-    # errors and re-raises everything else -- too narrow for "a DB call
-    # inside a tool blew up shouldn't take down the whole investigation".
+    # crashing the graph, so collect_evidence can record it in tool_errors.
+    # The langgraph default only catches invalid-arguments errors and
+    # re-raises everything else -- too narrow for "a DB call inside a tool
+    # blew up shouldn't take down the whole investigation".
     graph.add_node("tools", ToolNode(TOOLS, handle_tool_errors=True))
-    graph.add_node("assemble_rationale", assemble_rationale)
+    graph.add_node("collect_evidence", collect_evidence)
+    graph.add_node("compose_rationale", compose_rationale)
+    graph.add_node("validate", validate)
 
     graph.set_entry_point("route_entry")
     graph.add_edge("route_entry", "plan_tool_calls")
     graph.add_conditional_edges(
         "plan_tool_calls",
         tools_condition,
-        {"tools": "tools", "__end__": "assemble_rationale"},
+        {"tools": "tools", "__end__": "collect_evidence"},
     )
-    graph.add_edge("tools", "assemble_rationale")
-    graph.add_edge("assemble_rationale", END)
+    graph.add_edge("tools", "collect_evidence")
+    graph.add_edge("collect_evidence", "compose_rationale")
+    graph.add_edge("compose_rationale", "validate")
+    graph.add_edge("validate", END)
 
     return graph
 
 
 # Compiled once at import time and exposed for direct, request-path-free use
-# (e.g. investigation_graph.invoke({...}) from a script or test) until
-# SCRUM-53 wires this into the live endpoint.
+# (e.g. investigation_graph.invoke({...}) from a script or test) until a
+# future ticket wires this into the live endpoint (see this module's
+# docstring). Prefer invoke() below when LangSmith trace metadata is wanted
+# (SCRUM-53); tests exercising graph mechanics directly still use
+# investigation_graph.invoke(...) itself.
 investigation_graph = build_graph().compile()
+
+
+def invoke(state: InvestigationState) -> InvestigationState:
+    """SCRUM-53. investigation_graph.invoke() wrapped with LangSmith run
+    metadata via app.investigation_agent.tracing.invoke_investigation_graph
+    -- transaction_id, fired rule names, PROMPT_VERSION, model id up front,
+    and rationale_source patched on afterward if tracing is actually
+    enabled. Purely additive: behaves exactly like
+    investigation_graph.invoke(state) when tracing is off (the default) or
+    in CI (always forced off regardless).
+    """
+    return invoke_investigation_graph(investigation_graph, state)
