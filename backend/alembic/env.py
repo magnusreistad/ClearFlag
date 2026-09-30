@@ -17,8 +17,16 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+# disable_existing_loggers=False (SCRUM-56): fileConfig's own default
+# (True) sets .disabled = True on every Logger object that already exists
+# at this point -- this project's own module loggers, created at import
+# time, included -- which otherwise stays disabled for the rest of the
+# process once Alembic runs in-process (e.g. tests/test_agent_rationales_
+# migration.py's command.upgrade/command.downgrade). Only the [loggers]
+# section's root/sqlalchemy/alembic still get configured; nothing else is
+# touched.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Load DATABASE_URL from .env rather than hardcoding it in alembic.ini.
 load_dotenv()

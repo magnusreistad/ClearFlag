@@ -217,6 +217,18 @@ from app.investigation_agent.prompts import MAX_RATIONALE_CHARS
 # stripping (this version).
 VALIDATOR_VERSION = "v3"
 
+# SCRUM-56. Caps how many *validation-failed* composition attempts
+# scripts.compose_rationales will make per (transaction_id, fact_fingerprint,
+# prompt_version, VALIDATOR_VERSION) budget key before skipping that
+# transaction and leaving it on the interim rationale -- model output
+# varies, so unbounded retries could eventually push a borderline,
+# ungrounded rationale through validation by chance. A composition_error
+# attempt (a tool or model failure, not a validation failure) never
+# consumes this budget -- see scripts.compose_rationales._collect_pending.
+# A PROMPT_VERSION or VALIDATOR_VERSION bump resets the budget for every
+# transaction, same as it resets the pass/fail cache itself.
+MAX_VALIDATION_ATTEMPTS = 2
+
 # --- common-word dictionary (NGSL) -----------------------------------------
 
 _DATA_DIR = Path(__file__).parent / "data"

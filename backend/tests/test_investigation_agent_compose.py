@@ -15,6 +15,8 @@ test_investigation_agent_llm.py).
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import httpx
+from anthropic import APITimeoutError
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -216,8 +218,14 @@ class TestModelFailure:
 
         assert result["rationale"] == ""
         assert result["rationale_source"] == "interim"
-        assert result["composition_error"] == "simulated model timeout"
-        assert any(v.violation_type == "empty_rationale" for v in result["violations"])
+        # SCRUM-56: "ModelError: <ExceptionClass>(<status_code or ->): <message>" --
+        # TimeoutError carries no status_code, so getattr(exc, "status_code", None) is None.
+        assert result["composition_error"] == "ModelError: TimeoutError(-): simulated model timeout"
+        assert result["composition_error_label"] == "ModelError:TimeoutError(-)"
+        # SCRUM-56: validate() skips its grounding checks on a composition_error --
+        # an empty `rationale` here is a structural consequence of the model call
+        # failing, not a citation problem, so it must not be recorded as one.
+        assert result["violations"] == []
 
     def test_model_raising_does_not_crash_the_full_graph(self, monkeypatch):
         """Same failure, but through the full compiled graph (route_entry ->
@@ -260,30 +268,119 @@ class TestModelFailure:
 
         assert result["rationale"] == ""
         assert result["rationale_source"] == "interim"
-        assert result["composition_error"] == "simulated model timeout"
+        assert result["composition_error"] == "ModelError: TimeoutError(-): simulated model timeout"
+        assert result["violations"] == []
+
+    def test_model_raising_with_a_status_code_records_it(self, monkeypatch):
+        """A real anthropic API error (e.g. a 500/503 surviving SDK
+        max_retries) carries a status_code attribute -- confirms
+        getattr(exc, "status_code", None) picks it up rather than always
+        falling back to "-"."""
+
+        class _StatusCodedError(Exception):
+            def __init__(self, message: str, status_code: int):
+                super().__init__(message)
+                self.status_code = status_code
+
+        class _RaisingModel:
+            def invoke(self, *_args, **_kwargs):
+                raise _StatusCodedError("credential validation failed", status_code=500)
+
+        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+
+        result = _compose_then_validate(_meridian_state())
+
+        assert result["composition_error"] == "ModelError: _StatusCodedError(500): credential validation failed"
+        assert result["composition_error_label"] == "ModelError:_StatusCodedError(500)"
+        assert result["violations"] == []
+
+    def test_a_real_anthropic_api_timeout_error_is_recorded_as_such(self, monkeypatch):
+        """SCRUM-56 ticket input #1/#3: once get_chat_model()'s own SDK
+        max_retries are exhausted, the exception that reaches compose_rationale
+        can be a real anthropic SDK exception class -- confirms the real
+        anthropic.APITimeoutError (raised on a request timeout, carries no
+        status_code) round-trips through the generic `except Exception`
+        handling the same as any other exception, by class name."""
+
+        class _RaisingModel:
+            def invoke(self, *_args, **_kwargs):
+                raise APITimeoutError(httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+
+        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+
+        result = _compose_then_validate(_meridian_state())
+
+        assert result["composition_error"].startswith("ModelError: APITimeoutError(-): ")
+        assert result["composition_error_label"] == "ModelError:APITimeoutError(-)"
+        assert result["violations"] == []
+
+    def test_model_raising_a_long_message_is_truncated(self, monkeypatch):
+        long_message = "x" * 1000
+
+        class _RaisingModel:
+            def invoke(self, *_args, **_kwargs):
+                raise RuntimeError(long_message)
+
+        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+
+        result = _compose_then_validate(_meridian_state())
+
+        assert len(result["composition_error"]) < len(long_message)
+        assert result["composition_error"].startswith("ModelError: RuntimeError(-): " + "x" * 20)
 
 
-class TestToolErrorCitationStillFails:
-    def test_rationale_citing_a_failed_tools_facts_fails_validation(self, monkeypatch):
-        """get_geo_distance failing (tool_errors, no evidence key) but the
-        model still citing that tool's facts (distance_km, typical_location_label) must fail
-        -- "no tool call, no citation" holds even though the model wasn't told the tool failed
-        (it was only ever shown the facts that DID come back)."""
-        scripted = "This occurred 10,864.40 km from Seattle, WA, your typical location."
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _fake_model(scripted))
+class TestToolErrorAbortsComposition:
+    """SCRUM-56: a non-empty tool_errors now short-circuits compose_rationale
+    entirely -- no model call, no partial-evidence composition -- replacing
+    SCRUM-51's original "citing a failed tool's facts still fails
+    validation" behavior (which required a model call to happen first)."""
 
+    def test_tool_error_means_no_model_call_and_a_tool_error_composition_error(self, monkeypatch):
+        def _raise():
+            raise AssertionError("compose_rationale must not call get_chat_model when tool_errors is non-empty")
+
+        monkeypatch.setattr(graph_module, "get_chat_model", _raise)
+
+        # The exact shape ToolNode(handle_tool_errors=True) produces:
+        # "Error: <repr(exc)>\n Please fix your mistakes." (TOOL_CALL_ERROR_TEMPLATE).
         state = _meridian_state(
             evidence={
                 "get_merchant_risk_score": MERIDIAN_EVIDENCE["get_merchant_risk_score"],
             },
-            tool_errors={"get_geo_distance": "simulated get_geo_distance failure"},
+            tool_errors={
+                "get_geo_distance": "Error: RuntimeError('simulated get_geo_distance failure')\n Please fix your mistakes."
+            },
         )
 
         result = _compose_then_validate(state)
 
         assert result["rationale"] == ""
         assert result["rationale_source"] == "interim"
-        assert any(v.violation_type in ("ungrounded_number", "unsupported_entity") for v in result["violations"])
+        assert result["violations"] == []
+        assert result["composition_error"] == (
+            "ToolError[get_geo_distance]: RuntimeError: simulated get_geo_distance failure"
+        )
+        assert result["composition_error_label"] == "ToolError[get_geo_distance]:RuntimeError"
+
+    def test_multiple_tool_errors_are_all_named(self, monkeypatch):
+        def _raise():
+            raise AssertionError("compose_rationale must not call get_chat_model when tool_errors is non-empty")
+
+        monkeypatch.setattr(graph_module, "get_chat_model", _raise)
+
+        state = _meridian_state(
+            evidence={},
+            tool_errors={
+                "get_geo_distance": "Error: RuntimeError('boom')\n Please fix your mistakes.",
+                "get_merchant_risk_score": "Error: ValueError('also boom')\n Please fix your mistakes.",
+            },
+        )
+
+        result = _compose_then_validate(state)
+
+        assert "ToolError[get_geo_distance]: RuntimeError: boom" in result["composition_error"]
+        assert "ToolError[get_merchant_risk_score]: ValueError: also boom" in result["composition_error"]
+        assert result["violations"] == []
 
 
 class TestNoToolCompositionStillRuns:

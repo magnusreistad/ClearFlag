@@ -28,14 +28,19 @@ rationale (rationale_source="interim" -- SCRUM-56 owns what a caller does
 with that signal).
 """
 
+import logging
+import os
+import re
 from collections import Counter
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
+from sqlalchemy import text
 
 from app.database import SessionLocal
 from app.investigation_agent.derived_facts import compute_derived_facts
@@ -52,11 +57,85 @@ from app.models import Transaction
 from app.rules.geographic_anomaly import MIN_HISTORY_COUNT, _centroid, _haversine_miles
 from app.rules.velocity import DEFAULT_WINDOW_MINUTES
 
+logger = logging.getLogger(__name__)
+
 # 1 mile in kilometers, exact by definition (1 in = 2.54 cm) -- used to
 # convert get_geo_distance's haversine-in-miles (the unit
 # app.rules.geographic_anomaly itself thresholds on) into the km the
 # SCRUM-50 contract asks for, without a second distance computation.
 KM_PER_MILE = 1.609344
+
+# SCRUM-56: a tool exception's or model exception's message is truncated to
+# this many characters before it goes into composition_error -- long enough
+# to stay useful for an audit, short enough that a verbose DB/API error
+# message (which can run to several KB) doesn't bloat the column.
+_MAX_ERROR_MESSAGE_CHARS = 300
+
+
+def _truncate(text_value: str, limit: int = _MAX_ERROR_MESSAGE_CHARS) -> str:
+    return text_value if len(text_value) <= limit else text_value[:limit] + "…"
+
+
+# SCRUM-56: Postgres statement_timeout (milliseconds) applied only to this
+# module's own tool sessions (_tool_session below), not the FastAPI
+# request-path engine -- so a slow/hung DB call inside a tool becomes a
+# catchable tool error (ToolNode's handle_tool_errors=True) instead of
+# hanging composition indefinitely. Env-overridable, same convention as
+# app.investigation_agent.llm's DEFAULT_TIMEOUT_SECONDS.
+DEFAULT_TOOL_DB_TIMEOUT_MS = 5000
+
+
+@contextmanager
+def _tool_session():
+    """Opens a SessionLocal() session for a tool's DB query, applying
+    DEFAULT_TOOL_DB_TIMEOUT_MS (or INVESTIGATION_AGENT_TOOL_DB_TIMEOUT_MS)
+    as a Postgres `SET LOCAL statement_timeout` on that session alone.
+    No-op on SQLite (this project's test engine and the only other dialect
+    in use): SQLite has no statement_timeout equivalent, and a `SET LOCAL`
+    here would just fail against it. timeout_ms is validated by int() (a
+    bad env var is a config error, surfaced immediately) before going into
+    the SQL text, so this is never user-controlled string interpolation.
+    """
+    db = SessionLocal()
+    try:
+        if db.bind.dialect.name == "postgresql":
+            timeout_ms = int(os.getenv("INVESTIGATION_AGENT_TOOL_DB_TIMEOUT_MS", DEFAULT_TOOL_DB_TIMEOUT_MS))
+            db.execute(text(f"SET LOCAL statement_timeout = {timeout_ms}"))
+        yield db
+    finally:
+        db.close()
+
+
+# SCRUM-56: parses a ToolNode(handle_tool_errors=True) error ToolMessage's
+# content back into (exception class, message). That content is always
+# TOOL_CALL_ERROR_TEMPLATE.format(error=repr(exc)) --
+# "Error: <ClassName>(<repr'd args>)\n Please fix your mistakes." -- langgraph
+# doesn't expose the original exception object past ToolNode, only this
+# formatted string.
+_TOOL_ERROR_CONTENT_RE = re.compile(
+    r"^Error:\s*(?P<exc_class>[\w.]+)\((?P<message>.*)\)\s*\n Please fix your mistakes\.$",
+    re.DOTALL,
+)
+
+
+def _parse_tool_error(content: str) -> tuple[str, str]:
+    """Best-effort split of an error ToolMessage's content into (exception
+    class name, message) for a readable composition_error. Falls back to
+    ("ToolError", content) if the content doesn't match langgraph's current
+    template (e.g. a future langgraph version changes it) -- a parsing
+    surprise degrades to "still logged, less neatly", never a crash.
+    """
+    match = _TOOL_ERROR_CONTENT_RE.match(content)
+    if not match:
+        return "ToolError", content
+    exc_class = match.group("exc_class")
+    message = match.group("message")
+    # repr()'s single string arg is usually quoted, e.g. 'boom' -- strip
+    # matching outer quotes for readability; anything else (multi-arg
+    # exceptions, no quotes) is left untouched.
+    if len(message) >= 2 and message[0] == message[-1] and message[0] in ("'", '"'):
+        message = message[1:-1]
+    return exc_class, message
 
 # SCRUM-51: which tool each rule's evidence comes from -- the single source
 # of truth both plan_tool_calls (which tool_calls to build) and
@@ -90,9 +169,10 @@ def get_transaction_history(
     (not `>=`) exclusion test, and includes the flagged transaction itself
     since the rule's own count does.
 
-    Opens its own session via SessionLocal (module-level, so tests can
-    monkeypatch it) rather than taking a `db` parameter: this tool isn't on
-    the FastAPI request path yet, so there's no request-scoped session to
+    Opens its own session via _tool_session() (SCRUM-56: SessionLocal,
+    module-level so tests can monkeypatch it, plus the configurable Postgres
+    statement_timeout) rather than taking a `db` parameter: this tool isn't
+    on the FastAPI request path yet, so there's no request-scoped session to
     inject.
 
     response_format="content_and_artifact" (SCRUM-51): `content` is a short
@@ -103,8 +183,7 @@ def get_transaction_history(
     """
     window_start = anchor_timestamp - timedelta(minutes=window_minutes)
 
-    db = SessionLocal()
-    try:
+    with _tool_session() as db:
         rows = (
             db.query(Transaction)
             .filter(
@@ -115,8 +194,6 @@ def get_transaction_history(
             .order_by(Transaction.timestamp)
             .all()
         )
-    finally:
-        db.close()
 
     transactions = [{"timestamp": row.timestamp, "amount": row.amount, "merchant": row.merchant} for row in rows]
 
@@ -154,11 +231,10 @@ def get_merchant_risk_score(user_id: int, merchant: str, anchor_timestamp: datet
     documented, with this comment standing in for that missing data source
     rather than a fabricated scoring scheme.
 
-    Opens its own session via SessionLocal, same as get_transaction_history
+    Opens its own session via _tool_session(), same as get_transaction_history
     (SCRUM-48) and for the same reason: not on the FastAPI request path yet.
     """
-    db = SessionLocal()
-    try:
+    with _tool_session() as db:
         prior_transaction_count = (
             db.query(Transaction)
             .filter(
@@ -168,8 +244,6 @@ def get_merchant_risk_score(user_id: int, merchant: str, anchor_timestamp: datet
             )
             .count()
         )
-    finally:
-        db.close()
 
     evidence = {
         "user_id": user_id,
@@ -229,12 +303,11 @@ def get_geo_distance(user_id: int, latitude: float, longitude: float, anchor_tim
     all -- distance_km, distance_miles, and typical_location_label are all
     None rather than a guess from too small a sample.
 
-    Opens its own session via SessionLocal, same as get_transaction_history
+    Opens its own session via _tool_session(), same as get_transaction_history
     (SCRUM-48) and get_merchant_risk_score (SCRUM-49) and for the same
     reason: not on the FastAPI request path yet.
     """
-    db = SessionLocal()
-    try:
+    with _tool_session() as db:
         history = (
             db.query(Transaction)
             .filter(
@@ -244,8 +317,6 @@ def get_geo_distance(user_id: int, latitude: float, longitude: float, anchor_tim
             .order_by(Transaction.timestamp)
             .all()
         )
-    finally:
-        db.close()
 
     distance_km = None
     distance_miles = None
@@ -384,12 +455,29 @@ def compose_rationale(state: InvestigationState) -> dict:
     database access, no other context.
 
     Never retries and never crashes the graph on a model-call failure
-    (timeout, API error, ...): SCRUM-56 owns retries and structured failure
-    logging. The exception is recorded in composition_error and `rationale`
-    is left empty, which validate (below) then correctly fails as an
-    empty_rationale violation -- there is no separate "model failed" branch
-    in the graph, because an empty rationale already routes to the same
-    rationale_source="interim" outcome a validation failure would.
+    (timeout, API error, ...): the SDK's own retries already ran inside
+    get_chat_model()'s client (INVESTIGATION_AGENT_LLM_MAX_RETRIES); once
+    those are exhausted the exception is caught here and recorded in
+    composition_error, with `rationale` left empty. validate() (below) never
+    runs its grounding checks on a composition_error -- an empty rationale
+    from a genuine failure isn't a citation problem, and treating it as one
+    would misrepresent what happened in `violations`.
+
+    SCRUM-56: tool failures short-circuit here too, before any model call --
+    state["tool_errors"] (collect_evidence) is checked first, and a non-empty
+    one means composition never proceeds for this transaction at all (no
+    get_chat_model()/model.invoke() call, and no error text passed to the
+    model as evidence). composition_error is built from ALL failed tools
+    (not just the first), each rendered "ToolError[<tool>]: <ExceptionClass>:
+    <message>" via _parse_tool_error -- collect_evidence already keeps a
+    failing tool's evidence key absent, so this is really just turning that
+    into an audit-friendly string; a model failure (below) is instead
+    rendered "ModelError: <ExceptionClass>(<status_code or ->):
+    <message>", using getattr(exc, "status_code", None) since not every
+    exception type carries one (e.g. a plain TimeoutError). Both messages are
+    truncated (_MAX_ERROR_MESSAGE_CHARS) before going into the column, and
+    the model failure is also logged via logger.exception so the traceback
+    isn't lost to "caught and stringified".
 
     enforce_no_tracing_in_ci() runs here, not only in the optional
     invoke_investigation_graph wrapper (app.investigation_agent.tracing):
@@ -401,6 +489,27 @@ def compose_rationale(state: InvestigationState) -> dict:
     enforce_no_tracing_in_ci()
 
     transaction = state["transaction"]
+
+    tool_errors = state.get("tool_errors", {})
+    if tool_errors:
+        parts = []
+        labels = []
+        for tool_name in sorted(tool_errors):
+            exc_class, message = _parse_tool_error(str(tool_errors[tool_name]))
+            parts.append(f"ToolError[{tool_name}]: {exc_class}: {_truncate(message)}")
+            labels.append(f"ToolError[{tool_name}]:{exc_class}")
+        return {
+            "rationale": "",
+            "composed_rationale": "",
+            "composition_error": "; ".join(parts),
+            # SCRUM-56: a log-safe summary of composition_error -- class
+            # names only, never the message (which can embed a tool's own
+            # query args, e.g. merchant/lat-long) -- for
+            # scripts.compose_rationales's per-attempt log line. The full
+            # composition_error string above is what gets persisted.
+            "composition_error_label": "; ".join(labels),
+        }
+
     payload = build_payload(transaction, state["rule_names"], state.get("rule_values", {}))
     evidence = state.get("evidence", {})
     derived = compute_derived_facts(payload)
@@ -419,15 +528,29 @@ def compose_rationale(state: InvestigationState) -> dict:
         # it extracts and concatenates only the text-type blocks, and still
         # returns a plain string unchanged when content already was one.
         content = response.text
-    except Exception as exc:  # noqa: BLE001 -- SCRUM-53: never crash the graph on a model failure; SCRUM-56 owns retries/logging.
-        return {"rationale": "", "composed_rationale": "", "composition_error": str(exc)}
+    except Exception as exc:
+        logger.exception("Investigation Agent model call failed for transaction %s", transaction["id"])
+        status_code = getattr(exc, "status_code", None)
+        status_display = status_code if status_code is not None else "-"
+        composition_error = f"ModelError: {type(exc).__name__}({status_display}): {_truncate(str(exc))}"
+        return {
+            "rationale": "",
+            "composed_rationale": "",
+            "composition_error": composition_error,
+            "composition_error_label": f"ModelError:{type(exc).__name__}({status_display})",
+        }
 
     stripped = content.strip()
     # composed_rationale (SCRUM-53 follow-up) is the audit record of what
     # was actually produced this run -- written here and never touched by
     # validate() below, unlike `rationale`, which validate overwrites to ""
     # on a failed validation. See InvestigationState's docstring.
-    return {"rationale": stripped, "composed_rationale": stripped, "composition_error": None}
+    return {
+        "rationale": stripped,
+        "composed_rationale": stripped,
+        "composition_error": None,
+        "composition_error_label": None,
+    }
 
 
 def validate(state: InvestigationState) -> dict:
@@ -437,19 +560,29 @@ def validate(state: InvestigationState) -> dict:
     inputs) and checks the composed `rationale` against them.
 
     On pass, state carries the composed rationale unchanged with
-    rationale_source="agent". On failure -- including the case where
-    compose_rationale already recorded a composition_error and left
-    `rationale` empty, which always fails here as empty_rationale --
+    rationale_source="agent". On failure -- rationale_source="interim" --
     the composed rationale is discarded entirely (never repaired or
-    partially accepted, per the Design Doc) and rationale_source="interim",
-    so a caller falls back to the interim formatter's output (SCRUM-56).
-    violations is kept in state either way (empty on a pass) for that
-    caller's failure logging. Deliberately never returns/touches
-    composed_rationale: that key is compose_rationale's own audit record of
-    what was actually produced, and must survive a failed validation
-    unchanged (see InvestigationState's docstring) -- this function only
-    ever discards/keeps `rationale`, the "safe to serve" value.
+    partially accepted, per the Design Doc), so a caller falls back to the
+    interim formatter's output (SCRUM-56). violations is kept in state
+    either way (empty on a pass) for that caller's failure logging.
+    Deliberately never returns/touches composed_rationale: that key is
+    compose_rationale's own audit record of what was actually produced, and
+    must survive a failed validation unchanged (see InvestigationState's
+    docstring) -- this function only ever discards/keeps `rationale`, the
+    "safe to serve" value.
+
+    SCRUM-56: a composition_error (a tool failure or a model failure that
+    compose_rationale already caught) skips validate_rationale entirely and
+    goes straight to rationale_source="interim" with violations=[] -- an
+    empty `rationale` in that case is a structural consequence of the
+    failure, not a citation problem, and running the grounding checks on it
+    would otherwise record a generic empty_rationale violation that
+    misrepresents what actually happened (a tool/model failure, not a
+    validation failure).
     """
+    if state.get("composition_error"):
+        return {"rationale": "", "rationale_source": "interim", "violations": []}
+
     transaction = state["transaction"]
     payload = build_payload(transaction, state["rule_names"], state.get("rule_values", {}))
     evidence = state.get("evidence", {})

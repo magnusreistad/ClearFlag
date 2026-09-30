@@ -89,9 +89,18 @@ class InvestigationState(TypedDict):
     caller does with "interim" -- this graph never falls back to the interim
     formatter's text itself, it just signals that a caller should).
     violations carries validate_rationale's failures for that logging.
-    composition_error carries the model-call exception's message, if the
-    model call itself raised (see compose_rationale) -- separate from
-    tool_errors since it's a different failure class (model, not tool).
+    composition_error carries a readable record of why composition didn't
+    produce a trustworthy rationale (SCRUM-56): "ToolError[<tool>]:
+    <ExceptionClass>: <message>" (one or more, joined by "; ") when
+    tool_errors was non-empty and no model call was even attempted, or
+    "ModelError: <ExceptionClass>(<status_code or ->): <message>" when the
+    model call itself raised after get_chat_model()'s own SDK retries were
+    exhausted. composition_error_label is the same information reduced to
+    exception class names only (no message) -- log-safe, since a tool or
+    model exception's message can embed values (merchant, lat/long, API
+    response text) that shouldn't leave agent_rationales into application
+    logs; see scripts.compose_rationales's per-attempt log line, the only
+    reader of this key.
 
     composed_rationale (SCRUM-53 follow-up) is written once by
     compose_rationale and NEVER touched by validate -- unlike `rationale`,
@@ -115,3 +124,4 @@ class InvestigationState(TypedDict):
     rationale_source: str
     violations: list[Violation]
     composition_error: str | None
+    composition_error_label: str | None

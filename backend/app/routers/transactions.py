@@ -1,7 +1,9 @@
+import logging
 import threading
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import tuple_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -19,6 +21,8 @@ from app.rules.engine import (
 from app.schemas import TransactionListResponse, TransactionOut
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 # Serializes _refresh_flags so two concurrent requests (e.g. React
 # StrictMode double-firing the mount effect in dev, or overlapping browser
@@ -43,9 +47,10 @@ def _lookup_agent_rationales(
     covers every flagged transaction at once (no N+1): each transaction's
     CURRENT fact fingerprint is matched against validation_passed=true rows
     for PROMPT_VERSION. A transaction missing from the returned dict --
-    whether that's a cache miss, a failed-only row, or a stale
-    prompt_version -- gets exactly the same treatment from the caller: fall
-    back to the interim formatter's rationale, unchanged.
+    whether that's a cache miss, a failed-only row, a stale prompt_version,
+    or the lookup query itself raising (SCRUM-56: DB error, missing table)
+    -- gets exactly the same treatment from the caller: fall back to the
+    interim formatter's rationale, unchanged.
     """
     fingerprint_by_id = {
         transaction_id: compute_fact_fingerprint(
@@ -56,17 +61,34 @@ def _lookup_agent_rationales(
     if not fingerprint_by_id:
         return {}
 
-    rows = (
-        db.query(AgentRationale)
-        .filter(
-            tuple_(AgentRationale.transaction_id, AgentRationale.fact_fingerprint).in_(
-                list(fingerprint_by_id.items())
-            ),
-            AgentRationale.prompt_version == PROMPT_VERSION,
-            AgentRationale.validation_passed.is_(True),
+    # SCRUM-56: this SELECT is the one DB call on this request path that can
+    # fail for reasons unrelated to the caller's input (agent_rationales
+    # missing, a connection error, ...). It's wrapped in its own SAVEPOINT
+    # (db.begin_nested()) rather than left in the session's ambient
+    # transaction: on Postgres, an unhandled statement error poisons the
+    # whole transaction until rolled back, which would otherwise take down
+    # the plain Transaction query list_transactions still has to run after
+    # this returns. A SQLAlchemyError here is caught, logged, and treated
+    # exactly like every other kind of miss -- every flagged transaction
+    # falls back to the interim rationale -- rather than surfacing as a 500.
+    try:
+        with db.begin_nested():
+            rows = (
+                db.query(AgentRationale)
+                .filter(
+                    tuple_(AgentRationale.transaction_id, AgentRationale.fact_fingerprint).in_(
+                        list(fingerprint_by_id.items())
+                    ),
+                    AgentRationale.prompt_version == PROMPT_VERSION,
+                    AgentRationale.validation_passed.is_(True),
+                )
+                .all()
+            )
+    except SQLAlchemyError:
+        logger.exception(
+            "agent_rationales lookup failed; serving the interim rationale for every flagged transaction"
         )
-        .all()
-    )
+        return {}
 
     latest_by_id: dict[int, AgentRationale] = {}
     for row in rows:

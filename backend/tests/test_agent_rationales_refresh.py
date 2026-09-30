@@ -6,12 +6,13 @@ pattern as tests/test_transactions.py, kept in a separate file so these
 SCRUM-53 Phase B cases don't get lost among that file's SCRUM-61 cases.
 """
 
+import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -22,7 +23,7 @@ from app.investigation_agent.payload import build_payload
 from app.investigation_agent.prompts import PROMPT_VERSION
 from app.investigation_agent.state import transaction_data_from_orm
 from app.main import app
-from app.models import AgentRationale, Transaction, User
+from app.models import AgentRationale, Transaction, TransactionFlag, User
 from app.rules.engine import (
     evaluate_all_rules,
     rule_names_by_transaction,
@@ -256,3 +257,46 @@ def test_refresh_makes_zero_writes_to_agent_rationales():
     db.close()
 
     assert after_count == before_count
+
+
+def test_agent_rationales_lookup_failure_serves_interim_for_every_flag(caplog):
+    """SCRUM-56: _lookup_agent_rationales wraps its SELECT in its own
+    SAVEPOINT (db.begin_nested()) and catches SQLAlchemyError -- so a
+    lookup-layer failure (simulated here by dropping the agent_rationales
+    table out from under it, producing a real OperationalError) must not
+    surface as a 500. Every flagged transaction falls back to the interim
+    rationale exactly as a cache miss would, the SAVEPOINT keeps the
+    session's transaction usable afterward (proven by the plain Transaction
+    query list_transactions still has to run succeeding), the delete/
+    reinsert _refresh_flags already committed for TransactionFlag survives
+    untouched (it's a separate, already-committed transaction, never
+    something this SAVEPOINT could roll back), and the failure is logged.
+    """
+    # Names the logger explicitly rather than relying on the root logger's
+    # level (SCRUM-56): alembic.ini sets ROOT's level to WARNING, and
+    # Alembic's env.py runs in-process for test_agent_rationales_migration.py
+    # -- naming app.routers.transactions directly sets its level
+    # independent of whatever the root logger's level happens to be.
+    caplog.set_level(logging.INFO, logger="app.routers.transactions")
+    user_id, outlier_id, fingerprint = _seed_flagged_transaction()
+    _insert_agent_rationale(transaction_id=outlier_id, fact_fingerprint=fingerprint)
+
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE agent_rationales"))
+
+    response = client.get("/transactions", params={"user_id": user_id})
+
+    assert response.status_code == 200
+    items_by_id = {item["id"]: item for item in response.json()["items"]}
+    assert "higher than your typical spend" in items_by_id[outlier_id]["rationale"]
+
+    db = TestingSessionLocal()
+    flag_count = db.query(TransactionFlag).filter(TransactionFlag.transaction_id == outlier_id).count()
+    db.close()
+    assert flag_count == 1  # the flags _refresh_flags already committed are untouched
+
+    assert "agent_rationales lookup failed" in caplog.text
+    assert any(record.levelname == "ERROR" for record in caplog.records)
+
+    # Recreate the table so this test doesn't corrupt state for others sharing `engine`.
+    Base.metadata.tables["agent_rationales"].create(bind=engine)
