@@ -1,6 +1,7 @@
 """SCRUM-53 Phase B / SCRUM-56: scripts.compose_rationales -- mock mode only,
-no network. Own in-memory SQLite engine, monkeypatched onto the script's own
-SessionLocal so it never touches the real Neon DB.
+no network. The script's own SessionLocal is app.database.SessionLocal,
+which tests/conftest.py binds to TEST_DATABASE_URL, so it never touches the
+real Neon DB.
 
 SCRUM-56 switched the script's logging from print() to a module logger
 (logging.getLogger(__name__)) -- assertions on its output use pytest's
@@ -24,11 +25,8 @@ from decimal import Decimal
 import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
+from app.database import SessionLocal as TestingSessionLocal
 from app.investigation_agent import graph as graph_module
 from app.investigation_agent.fingerprint import compute_fact_fingerprint
 from app.investigation_agent.payload import build_payload
@@ -46,26 +44,11 @@ from app.rules.engine import (
 )
 from scripts import compose_rationales
 
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 GROUNDED_RATIONALE = (
     "This $500.00 purchase is far above your typical spend in this category, "
     "standing out clearly from your usual pattern."
 )
 UNGROUNDED_RATIONALE = "This looks like it happened in Wakanda, which is unusual."
-
-
-@pytest.fixture(autouse=True)
-def db_schema(monkeypatch):
-    Base.metadata.create_all(bind=engine)
-    monkeypatch.setattr(compose_rationales, "SessionLocal", TestingSessionLocal)
-    yield
-    Base.metadata.drop_all(bind=engine)
 
 
 def _fake_model_sequence(texts: list[str]):

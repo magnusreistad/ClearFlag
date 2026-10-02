@@ -19,11 +19,9 @@ from pathlib import Path
 from typing import ClassVar
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
+from app.database import engine
 from app.investigation_agent.payload import build_payload
 from app.investigation_agent.state import TransactionData
 from app.investigation_agent.validation import validate_rationale
@@ -40,19 +38,7 @@ from app.rules.velocity import evaluate_velocity
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "investigation_agent_meridian_843.json"
 
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
-
-
-@pytest.fixture(autouse=True)
-def db_schema():
-    Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
 
 
 BASE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
