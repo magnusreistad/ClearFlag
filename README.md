@@ -63,6 +63,8 @@ Not yet built: fraud-flag badges, rationale cards, the rules engine, and auth (a
 ## Local development (backend)
 
 ```bash
+git config core.hooksPath .githooks   # once per clone: blocks committing .env files (except .env.example)
+
 cd backend
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
