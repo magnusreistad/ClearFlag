@@ -83,8 +83,10 @@ Visit `http://localhost:8000/health` to confirm the API is running.
 The test suite runs against a real Postgres 18 — never SQLite, and never Neon. Locally that's a Docker container (`backend/docker-compose.yml`, on port 5433); with `TEST_DATABASE_URL` copied into `backend/.env` from `.env.example`, it's one command from `backend/`:
 
 ```bash
-docker compose up -d --wait && pytest
+source venv/bin/activate && docker compose up -d --wait && pytest
 ```
+
+Needs a Docker runtime with the Compose v2 plugin (e.g. OrbStack or Docker Desktop). If `docker` isn't found right after installing one, open a new terminal — the installer adds it to your PATH via your shell profile, which only takes effect in new shells.
 
 `tests/conftest.py` rebuilds the schema from scratch with `alembic upgrade head` at the start of every run and truncates every table before each test, so it refuses any `TEST_DATABASE_URL` whose database name doesn't contain `test`. `docker compose down -v` throws the database away entirely.
 
