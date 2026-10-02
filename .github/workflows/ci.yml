@@ -39,7 +39,7 @@ jobs:
           # set, but SQLAlchemy's create_engine() is lazy and never connects here.
           # Tests override the get_db dependency with an in-memory SQLite session,
           # so this value is never actually used to reach a database.
-          DATABASE_URL: postgresql://ci:ci@localhost/ci_placeholder
+          DATABASE_URL: postgresql+psycopg2://ci:ci@localhost/ci_placeholder
         run: |
           if [ -d tests ]; then pytest; else echo "No tests directory yet — skipping."; fi
 

@@ -106,7 +106,7 @@ Returns `{ items, total, limit, offset }`, where each item is `id, user_id, time
 The backend requires a `.env` file in `backend/` (copy `.env.example` and fill in real values) with:
 
 ```
-DATABASE_URL=postgresql://<user>:<password>@<host>/<dbname>
+DATABASE_URL=postgresql+psycopg2://<user>:<password>@<host>/<dbname>
 ```
 
 This project uses Neon Postgres with separate branches for dev and production:
