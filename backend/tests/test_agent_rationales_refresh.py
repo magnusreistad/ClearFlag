@@ -1,9 +1,9 @@
 """SCRUM-53 Phase B: app/routers/transactions.py's _refresh_flags reads
 agent_rationales (via _lookup_agent_rationales) but never writes to it and
 never calls a model -- composition only ever happens in
-scripts.compose_rationales. Own TestClient + in-memory SQLite engine, same
-pattern as tests/test_transactions.py, kept in a separate file so these
-SCRUM-53 Phase B cases don't get lost among that file's SCRUM-61 cases.
+scripts.compose_rationales. Own TestClient, same pattern as
+tests/test_transactions.py, kept in a separate file so these SCRUM-53 Phase B
+cases don't get lost among that file's SCRUM-61 cases.
 """
 
 import logging
@@ -14,9 +14,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base, get_db
+from app.database import SessionLocal as TestingSessionLocal
+from app.database import get_db
 from app.investigation_agent import llm as llm_module
 from app.investigation_agent.fingerprint import compute_fact_fingerprint
 from app.investigation_agent.payload import build_payload
@@ -30,43 +30,30 @@ from app.rules.engine import (
     rule_values_by_transaction,
 )
 
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 client = TestClient(app)
 
 
-@pytest.fixture(autouse=True)
-def db_schema():
-    """Also swaps app.dependency_overrides[get_db] in for the duration of
-    each test, restoring whatever was there before -- tests/test_transactions.py
-    sets its OWN override at module scope (against its own, different
-    engine), and since app.dependency_overrides is a plain dict on the
-    shared FastAPI `app` singleton, whichever file's module-level assignment
-    happens to run last at collection time would otherwise silently win for
-    every test in the process, regardless of which file is executing."""
-    Base.metadata.create_all(bind=engine)
-    previous_override = app.dependency_overrides.get(get_db)
-    app.dependency_overrides[get_db] = override_get_db
-    yield
-    if previous_override is not None:
-        app.dependency_overrides[get_db] = previous_override
-    else:
-        app.dependency_overrides.pop(get_db, None)
-    Base.metadata.drop_all(bind=engine)
+@pytest.fixture
+def scratch_db(migrated_scratch_database_url, monkeypatch):
+    """For a test that changes the schema (drops a table): points both this
+    module's seeding helpers (via TestingSessionLocal, looked up at call
+    time) and the app's get_db at a throwaway migrated database, so the
+    shared session schema every other test relies on is never touched.
+    Returns that database's engine."""
+    scratch_engine = create_engine(migrated_scratch_database_url)
+    scratch_session_local = sessionmaker(autocommit=False, autoflush=False, bind=scratch_engine)
+
+    def scratch_get_db():
+        db = scratch_session_local()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    monkeypatch.setitem(globals(), "TestingSessionLocal", scratch_session_local)
+    monkeypatch.setitem(app.dependency_overrides, get_db, scratch_get_db)
+    yield scratch_engine
+    scratch_engine.dispose()
 
 
 def _fingerprint_for(all_transactions: list[Transaction], outlier_id: int) -> str:
@@ -259,12 +246,13 @@ def test_refresh_makes_zero_writes_to_agent_rationales():
     assert after_count == before_count
 
 
-def test_agent_rationales_lookup_failure_serves_interim_for_every_flag(caplog):
+def test_agent_rationales_lookup_failure_serves_interim_for_every_flag(caplog, scratch_db):
     """SCRUM-56: _lookup_agent_rationales wraps its SELECT in its own
     SAVEPOINT (db.begin_nested()) and catches SQLAlchemyError -- so a
     lookup-layer failure (simulated here by dropping the agent_rationales
-    table out from under it, producing a real OperationalError) must not
-    surface as a 500. Every flagged transaction falls back to the interim
+    table out from under it, producing a real ProgrammingError -- in the
+    scratch_db fixture's throwaway database, never the shared schema) must
+    not surface as a 500. Every flagged transaction falls back to the interim
     rationale exactly as a cache miss would, the SAVEPOINT keeps the
     session's transaction usable afterward (proven by the plain Transaction
     query list_transactions still has to run succeeding), the delete/
@@ -281,7 +269,7 @@ def test_agent_rationales_lookup_failure_serves_interim_for_every_flag(caplog):
     user_id, outlier_id, fingerprint = _seed_flagged_transaction()
     _insert_agent_rationale(transaction_id=outlier_id, fact_fingerprint=fingerprint)
 
-    with engine.begin() as conn:
+    with scratch_db.begin() as conn:
         conn.execute(text("DROP TABLE agent_rationales"))
 
     response = client.get("/transactions", params={"user_id": user_id})
@@ -297,6 +285,3 @@ def test_agent_rationales_lookup_failure_serves_interim_for_every_flag(caplog):
 
     assert "agent_rationales lookup failed" in caplog.text
     assert any(record.levelname == "ERROR" for record in caplog.records)
-
-    # Recreate the table so this test doesn't corrupt state for others sharing `engine`.
-    Base.metadata.tables["agent_rationales"].create(bind=engine)

@@ -11,6 +11,31 @@ jobs:
     name: Backend Lint & Test
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        # Postgres 18 (Neon): matches the Neon dev/prod branches (18.6). Keep in
+        # step with backend/docker-compose.yml.
+        image: postgres:18
+        env:
+          POSTGRES_USER: clearflag
+          POSTGRES_PASSWORD: clearflag
+          POSTGRES_DB: clearflag_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clearflag -d clearflag_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    env:
+      # The suite runs against the service container above (SCRUM-67). Both
+      # point at the same database: alembic/env.py reads DATABASE_URL, and
+      # tests/conftest.py reads TEST_DATABASE_URL (and points DATABASE_URL at
+      # it itself before the app is imported).
+      DATABASE_URL: postgresql+psycopg2://clearflag:clearflag@localhost:5432/clearflag_test
+      TEST_DATABASE_URL: postgresql+psycopg2://clearflag:clearflag@localhost:5432/clearflag_test
+
     defaults:
       run:
         working-directory: ./backend
@@ -33,15 +58,15 @@ jobs:
       - name: Lint with ruff
         run: ruff check .
 
+      # Exercises the migrations through the real CLI against the fresh service
+      # database, as a step of its own so a broken migration fails here by name
+      # rather than inside a test fixture. (tests/conftest.py then rebuilds the
+      # schema from scratch the same way for the suite itself.)
+      - name: Apply migrations to a fresh database
+        run: alembic upgrade head
+
       - name: Run tests
-        env:
-          # Placeholder only — importing app.database requires DATABASE_URL to be
-          # set, but SQLAlchemy's create_engine() is lazy and never connects here.
-          # Tests override the get_db dependency with an in-memory SQLite session,
-          # so this value is never actually used to reach a database.
-          DATABASE_URL: postgresql+psycopg2://ci:ci@localhost/ci_placeholder
-        run: |
-          if [ -d tests ]; then pytest; else echo "No tests directory yet — skipping."; fi
+        run: pytest
 
   # Frontend job placeholder — uncomment and fill in once the React app
   # is scaffolded in Sprint 3. Keeping this commented out avoids a

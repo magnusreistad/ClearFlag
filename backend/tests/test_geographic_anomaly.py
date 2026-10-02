@@ -2,12 +2,9 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from statistics import mean, stdev
 
-import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
+from app.database import engine
 from app.models import Transaction, User
 from app.rules.geographic_anomaly import (
     MIN_STD_DEV_FLOOR_MILES,
@@ -16,23 +13,11 @@ from app.rules.geographic_anomaly import (
     evaluate_geographic_anomaly,
 )
 
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
 # expire_on_commit=False: unlike test_transactions.py, these tests hand ORM
 # objects straight to evaluate_geographic_anomaly() after the session
 # closes, so their attributes must stay readable without a live session to
 # refresh from.
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
-
-
-@pytest.fixture(autouse=True)
-def db_schema():
-    Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
 
 
 BASE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)

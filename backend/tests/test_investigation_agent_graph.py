@@ -2,11 +2,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.database import Base
+from app.database import SessionLocal as TestingSessionLocal
 from app.investigation_agent import graph as graph_module
 from app.investigation_agent.graph import (
     KM_PER_MILE,
@@ -24,27 +21,6 @@ from app.rules.geographic_anomaly import (
     evaluate_geographic_anomaly,
 )
 from scripts.seed_transactions import generate_triple_rule_fraud
-
-# Same in-memory-SQLite-per-test pattern as tests/test_transactions.py, applied
-# here to the Investigation Agent's own SessionLocal (app.database.SessionLocal,
-# imported into graph.py at module scope) since get_transaction_history opens
-# its own session rather than taking one as a FastAPI-injected dependency --
-# there's no request-scoped session to override yet -- this graph still
-# isn't wired into the live FastAPI request path.
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-@pytest.fixture(autouse=True)
-def db_schema(monkeypatch):
-    Base.metadata.create_all(bind=engine)
-    monkeypatch.setattr(graph_module, "SessionLocal", TestingSessionLocal)
-    yield
-    Base.metadata.drop_all(bind=engine)
 
 
 def _transaction_data(transaction, *, id_: int, user_id: int) -> TransactionData:
@@ -283,7 +259,7 @@ def test_tool_exception_is_isolated_and_recorded_in_tool_errors(monkeypatch):
 class TestGetTransactionHistory:
     """SCRUM-48/51: direct unit tests of the get_transaction_history tool's
     underlying function (via .func, bypassing the Runnable/tool_call
-    envelope), against a real (in-memory SQLite) DB session, independent of
+    envelope), against a real (Postgres) DB session, independent of
     the graph's routing -- the routing tests above already cover that this
     tool gets called for a velocity-only flag.
     """
@@ -367,7 +343,7 @@ class TestGetTransactionHistory:
 
 class TestGetMerchantRiskScore:
     """SCRUM-49/51: direct unit tests of the get_merchant_risk_score tool's
-    underlying function (via .func), against a real (in-memory SQLite) DB
+    underlying function (via .func), against a real (Postgres) DB
     session, independent of the graph's routing -- the SCRUM-65 routing
     test above already covers that this tool gets called for a
     new_merchant_risk flag.
@@ -442,7 +418,7 @@ class TestGetMerchantRiskScore:
 
 class TestGetGeoDistance:
     """SCRUM-50/51: direct unit tests of the get_geo_distance tool's
-    underlying function (via .func), against a real (in-memory SQLite) DB
+    underlying function (via .func), against a real (Postgres) DB
     session, independent of the graph's routing (the SCRUM-65 routing test
     above already covers this tool getting called for a geographic_anomaly
     flag).
@@ -490,13 +466,6 @@ class TestGetGeoDistance:
             expected_miles = _haversine_miles(
                 expected_lat, expected_lon, seed_transaction.latitude, seed_transaction.longitude
             )
-            # history's timestamps come back tz-naive after the commit above
-            # (SQLite drops the offset on round-trip); seed_transaction was
-            # never persisted, so it's still tz-aware. evaluate_geographic_anomaly
-            # sorts by timestamp, so mixing the two raises -- strip
-            # seed_transaction's tzinfo here (after get_geo_distance already
-            # ran) purely so this sanity check can compare like with like.
-            seed_transaction.timestamp = seed_transaction.timestamp.replace(tzinfo=None)
             rule_hits = evaluate_geographic_anomaly([*history, seed_transaction])
         finally:
             db.close()

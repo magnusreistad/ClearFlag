@@ -26,10 +26,12 @@ clearflag/
 │   │   ├── smoke_test_db.py     # Manual insert/read-back check against the DB
 │   │   └── seed_transactions.py # Generates synthetic transaction data w/ planted fraud
 │   ├── tests/
-│   │   └── test_health.py
+│   │   ├── conftest.py          # Shared Postgres test harness (TEST_DATABASE_URL)
+│   │   └── test_*.py
 │   ├── .env                     # not committed — see Local development
 │   ├── alembic.ini
 │   ├── conftest.py              # Empty on purpose — see explanation within .py file
+│   ├── docker-compose.yml       # Local Postgres 18 for the test suite
 │   ├── requirements-dev.txt
 │   └── requirements.txt
 ├── frontend/
@@ -74,6 +76,18 @@ uvicorn app.main:app --reload
 
 Visit `http://localhost:8000/health` to confirm the API is running.
 
+### Running backend tests
+
+The test suite runs against a real Postgres 18 — never SQLite, and never Neon. Locally that's a Docker container (`backend/docker-compose.yml`, on port 5433); with `TEST_DATABASE_URL` copied into `backend/.env` from `.env.example`, it's one command from `backend/`:
+
+```bash
+docker compose up -d --wait && pytest
+```
+
+`tests/conftest.py` rebuilds the schema from scratch with `alembic upgrade head` at the start of every run and truncates every table before each test, so it refuses any `TEST_DATABASE_URL` whose database name doesn't contain `test`. `docker compose down -v` throws the database away entirely.
+
+CI (`.github/workflows/ci.yml`) runs the same suite against a `postgres:18` service container, after first applying the migrations to it with `alembic upgrade head`.
+
 ## Local development (frontend)
 
 ```bash
@@ -109,7 +123,7 @@ The backend requires a `.env` file in `backend/` (copy `.env.example` and fill i
 DATABASE_URL=postgresql+psycopg2://<user>:<password>@<host>/<dbname>
 ```
 
-This project uses Neon Postgres with separate branches for dev and production:
+This project uses **Postgres 18 (Neon)** — Neon Postgres with separate branches for dev and production, both on 18.x. The test database (below) and CI's Postgres service are pinned to the same major version.
 
 - Active development, migrations, and synthetic data generation run against the **dev** branch.
 - The **production** branch stays empty until deployment (Sprint 6).
