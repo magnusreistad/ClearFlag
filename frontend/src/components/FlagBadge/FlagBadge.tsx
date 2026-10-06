@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { splitRationale } from '../../lib/rationale'
+import { FLAG_MARKER, splitRationale } from '../../lib/rationale'
 import styles from './FlagBadge.module.css'
 
 interface FlagBadgeProps {
@@ -27,8 +27,12 @@ export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBa
   // viewport rect rather than rendered as a CSS-absolute child - otherwise
   // the list's `overflow: hidden` cuts it off.
   const [panelPosition, setPanelPosition] = useState<{ top: number; left: number } | null>(null)
+  const trimmedRationale = rationale.trim()
   const reasons = useMemo(() => splitRationale(rationale), [rationale])
   const ruleCount = ruleNames.length
+  const isInterimFormat = trimmedRationale.startsWith(FLAG_MARKER)
+  const isReasonList = isInterimFormat && reasons.length > 1
+  const paragraph = isInterimFormat ? reasons[0] : trimmedRationale
 
   useLayoutEffect(() => {
     if (!isOpen || !buttonRef.current) {
@@ -92,9 +96,7 @@ export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBa
             aria-label="Why this transaction was flagged"
             style={{ top: panelPosition.top, left: panelPosition.left }}
           >
-            {ruleCount === 1 ? (
-              <p className={styles.singleReason}>{reasons[0]}</p>
-            ) : (
+            {isReasonList ? (
               <ul className={styles.reasonList}>
                 {reasons.map((reason, index) => (
                   <li key={index} className={styles.reasonItem}>
@@ -102,6 +104,8 @@ export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBa
                   </li>
                 ))}
               </ul>
+            ) : (
+              <p className={styles.singleReason}>{paragraph}</p>
             )}
           </div>,
           document.body,
