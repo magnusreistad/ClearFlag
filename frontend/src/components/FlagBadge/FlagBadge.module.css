@@ -72,6 +72,9 @@
   border: 1px solid #eff0f6;
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(20, 20, 43, 0.12);
+  /* Portaled to document.body, outside .feed, so it doesn't inherit the
+     feed's font stack. */
+  font-family: var(--font-sans);
 }
 
 .singleReason {

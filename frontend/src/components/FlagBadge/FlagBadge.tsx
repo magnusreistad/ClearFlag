@@ -10,7 +10,6 @@ interface FlagBadgeProps {
   onOpenChange: (open: boolean) => void
 }
 
-const PANEL_WIDTH = 280
 const VIEWPORT_MARGIN = 16
 // A flag with no explanation text still keeps its badge (the flag and its
 // severity are real); the panel says so rather than opening empty.
@@ -37,13 +36,19 @@ export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBa
   const isReasonList = isInterimFormat && reasons.length > 1
   const paragraph = (isInterimFormat ? reasons[0] : trimmedRationale) || NO_RATIONALE_FALLBACK
 
+  // The panel renders hidden for one layout pass so its real width can be
+  // measured before it's placed - `.panel` is content-box, so its padding
+  // and border sit outside the 280px CSS width, and clamping against 280
+  // let it run ~14px past the right edge on narrow viewports. Both passes
+  // happen before paint.
   useLayoutEffect(() => {
-    if (!isOpen || !buttonRef.current) {
+    if (!isOpen || !buttonRef.current || !panelRef.current) {
       setPanelPosition(null)
       return
     }
     const rect = buttonRef.current.getBoundingClientRect()
-    const left = Math.min(rect.left, window.innerWidth - PANEL_WIDTH - VIEWPORT_MARGIN)
+    const panelWidth = panelRef.current.getBoundingClientRect().width
+    const left = Math.min(rect.left, window.innerWidth - panelWidth - VIEWPORT_MARGIN)
     setPanelPosition({ top: rect.bottom + 6, left: Math.max(VIEWPORT_MARGIN, left) })
   }, [isOpen])
 
@@ -90,14 +95,13 @@ export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBa
         Flagged
       </button>
       {isOpen &&
-        panelPosition &&
         createPortal(
           <div
             ref={panelRef}
             className={styles.panel}
             role="region"
             aria-label="Why this transaction was flagged"
-            style={{ top: panelPosition.top, left: panelPosition.left }}
+            style={panelPosition ? { top: panelPosition.top, left: panelPosition.left } : { visibility: 'hidden' }}
           >
             {isReasonList ? (
               <ul className={styles.reasonList}>
