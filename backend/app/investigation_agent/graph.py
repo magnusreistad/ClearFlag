@@ -48,10 +48,7 @@ from app.investigation_agent.llm import get_chat_model
 from app.investigation_agent.payload import build_payload
 from app.investigation_agent.prompts import build_prompt
 from app.investigation_agent.state import InvestigationState, TransactionData
-from app.investigation_agent.tracing import (
-    enforce_no_tracing_in_ci,
-    invoke_investigation_graph,
-)
+from app.investigation_agent.tracing import invoke_investigation_graph
 from app.investigation_agent.validation import validate_rationale
 from app.models import Transaction
 from app.rules.geographic_anomaly import MIN_HISTORY_COUNT, _centroid, _haversine_miles
@@ -479,15 +476,11 @@ def compose_rationale(state: InvestigationState) -> dict:
     the model failure is also logged via logger.exception so the traceback
     isn't lost to "caught and stringified".
 
-    enforce_no_tracing_in_ci() runs here, not only in the optional
-    invoke_investigation_graph wrapper (app.investigation_agent.tracing):
-    this is the one place in the graph that can start a trace at all (the
-    model call below), and tests/callers that invoke investigation_graph
-    directly -- bypassing that wrapper -- must still never make a tracing
-    network call in CI.
+    No tracing enforcement here (SCRUM-75): by the time a node runs,
+    tracing for the whole run was already decided at graph.invoke, so CI
+    enforcement lives in invoke_investigation_graph
+    (app.investigation_agent.tracing), before the run starts.
     """
-    enforce_no_tracing_in_ci()
-
     transaction = state["transaction"]
 
     tool_errors = state.get("tool_errors", {})
@@ -636,9 +629,10 @@ def build_graph() -> StateGraph:
 # Compiled once at import time and exposed for direct, request-path-free use
 # (e.g. investigation_graph.invoke({...}) from a script or test) until a
 # future ticket wires this into the live endpoint (see this module's
-# docstring). Prefer invoke() below when LangSmith trace metadata is wanted
-# (SCRUM-53); tests exercising graph mechanics directly still use
-# investigation_graph.invoke(...) itself.
+# docstring). Use invoke() below from any real caller: it attaches LangSmith
+# trace metadata (SCRUM-53) and is the only path with CI tracing enforcement
+# (SCRUM-75). Tests exercising graph mechanics directly still use
+# investigation_graph.invoke(...) itself, relying on the SCRUM-54 test guard.
 investigation_graph = build_graph().compile()
 
 
@@ -649,6 +643,7 @@ def invoke(state: InvestigationState) -> InvestigationState:
     and rationale_source patched on afterward if tracing is actually
     enabled. Purely additive: behaves exactly like
     investigation_graph.invoke(state) when tracing is off (the default) or
-    in CI (always forced off regardless).
+    in CI (always forced off here, before the run starts -- calling
+    investigation_graph.invoke directly gets no such enforcement).
     """
     return invoke_investigation_graph(investigation_graph, state)
