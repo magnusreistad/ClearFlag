@@ -12,6 +12,9 @@ interface FlagBadgeProps {
 
 const PANEL_WIDTH = 280
 const VIEWPORT_MARGIN = 16
+// A flag with no explanation text still keeps its badge (the flag and its
+// severity are real); the panel says so rather than opening empty.
+const NO_RATIONALE_FALLBACK = 'No explanation is available for this flag.'
 
 // Rule count comes from `ruleNames` (one entry per hit, API-provided -
 // SCRUM-64) rather than from splitting `rationale`. The individual reason
@@ -32,7 +35,7 @@ export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBa
   const ruleCount = ruleNames.length
   const isInterimFormat = trimmedRationale.startsWith(FLAG_MARKER)
   const isReasonList = isInterimFormat && reasons.length > 1
-  const paragraph = isInterimFormat ? reasons[0] : trimmedRationale
+  const paragraph = (isInterimFormat ? reasons[0] : trimmedRationale) || NO_RATIONALE_FALLBACK
 
   useLayoutEffect(() => {
     if (!isOpen || !buttonRef.current) {

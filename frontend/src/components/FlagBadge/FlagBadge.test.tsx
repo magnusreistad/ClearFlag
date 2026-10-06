@@ -165,6 +165,15 @@ describe('FlagBadge', () => {
     expect(screen.queryByRole('list')).not.toBeInTheDocument()
   })
 
+  it('shows a fixed fallback line for a whitespace-only rationale, keeping the badge and its tier', async () => {
+    const { container } = render(<ControlledFlagBadge rationale={'  \n '} ruleNames={AGENT_THREE_RULE_NAMES} />)
+    await userEvent.click(screen.getByRole('button', { name: /flagged/i }))
+
+    expect(screen.getByRole('region')).toHaveTextContent(/^No explanation is available for this flag\.$/)
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-rule-count]')).toHaveAttribute('data-rule-count', '3')
+  })
+
   it('toggles the panel closed when the badge is clicked again', async () => {
     render(<ControlledFlagBadge rationale={SINGLE_RULE_RATIONALE} ruleNames={SINGLE_RULE_NAMES} />)
     const badge = screen.getByRole('button', { name: /flagged/i })

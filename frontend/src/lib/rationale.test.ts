@@ -28,4 +28,8 @@ describe('splitRationale', () => {
   it('returns an empty array for an empty string', () => {
     expect(splitRationale('')).toEqual([])
   })
+
+  it('returns an empty array for a whitespace-only string', () => {
+    expect(splitRationale('  \n ')).toEqual([])
+  })
 })
