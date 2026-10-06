@@ -16,11 +16,18 @@ const VIEWPORT_MARGIN = 16
 const NO_RATIONALE_FALLBACK = 'No explanation is available for this flag.'
 
 // Rule count comes from `ruleNames` (one entry per hit, API-provided -
-// SCRUM-64) rather than from splitting `rationale`. The individual reason
-// text still comes from splitRationale since the API exposes one combined
-// rationale string, not per-rule text. Exposed here via data-rule-count so
-// SCRUM-26's severity treatment has a hook to key off of without re-deriving
-// it.
+// SCRUM-64) rather than from the rationale text, and it only drives
+// data-rule-count, the hook SCRUM-26's severity treatment keys off.
+//
+// The panel's layout is decided from the text alone (SCRUM-57), since the
+// API doesn't say which of the two rationale shapes it served (see
+// lib/rationale.ts). Interim formatter text - trimmed text starting with
+// "Flagged: " - with more than one segment renders as a list, one reason
+// per segment; a single interim segment renders as a paragraph without its
+// prefix. Anything else is an agent paragraph and renders whole, including
+// a multi-rule one, which is one composed paragraph rather than per-rule
+// sentences. Requiring the leading marker keeps an agent paragraph that
+// happens to contain "Flagged: " mid-text from being split into bullets.
 export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBadgeProps) {
   const buttonRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
