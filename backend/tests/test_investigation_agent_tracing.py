@@ -74,7 +74,7 @@ def _langsmith_env_cache_cleared():
     langsmith.utils.get_env_var.cache_clear()
 
 
-@pytest.mark.xfail(strict=True, reason="<NEW-TICKET>: langsmith env cache; enforcement runs after graph.invoke")
+@pytest.mark.xfail(strict=True, reason="SCRUM-75: langsmith env cache; enforcement runs after graph.invoke")
 def test_enforce_no_tracing_in_ci_turns_off_langsmiths_own_tracing_check(monkeypatch, _langsmith_env_cache_cleared):
     """SCRUM-54 finding. enforce_no_tracing_in_ci() only rewrites os.environ,
     but langsmith reads tracing env vars through an lru_cache'd get_env_var
