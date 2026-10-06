@@ -5,22 +5,19 @@ network, no real DB -- per the ticket's Phase A test list.
 Most tests here call compose_rationale/validate directly against a hand-built InvestigationState
 rather than running the full graph: composition/validation is what's under test, not tool
 routing (already covered by test_investigation_agent_graph.py) or DB access, and calling the
-nodes directly means these tests need no seeded database at all. get_chat_model is always
-monkeypatched on app.investigation_agent.graph (where compose_rationale imports it), never left
-to its real mock-mode default -- these tests are about what compose_rationale/validate do with a
-*specific* model response, not about llm.py's own mock/live toggle (covered by
-test_investigation_agent_llm.py).
+nodes directly means these tests need no seeded database at all. Every model response
+(including a raised exception) is scripted through the scripted_llm fixture (SCRUM-54,
+tests/agent_fixtures.py's ScriptedLLM), never left to get_chat_model's canned mock default --
+these tests are about what compose_rationale/validate do with a *specific* model response, not
+about llm.py's own mock/live toggle (covered by test_investigation_agent_llm.py).
 """
 
 from datetime import datetime, timezone
 from decimal import Decimal
 
-import httpx
-from anthropic import APITimeoutError
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from agent_fixtures import anthropic_error
 from langchain_core.messages import AIMessage, ToolMessage
 
-from app.investigation_agent import graph as graph_module
 from app.investigation_agent.graph import (
     collect_evidence,
     compose_rationale,
@@ -94,17 +91,6 @@ def _meridian_state(**overrides) -> InvestigationState:
     return state
 
 
-def _fake_model(text: str) -> GenericFakeChatModel:
-    return GenericFakeChatModel(messages=iter([AIMessage(content=text)]))
-
-
-def _fake_model_with_content(content: list) -> GenericFakeChatModel:
-    """Like _fake_model, but for scripting a block-list `content` (e.g. a
-    live model's extended-thinking response shape) instead of a plain
-    string."""
-    return GenericFakeChatModel(messages=iter([AIMessage(content=content)]))
-
-
 def _compose_then_validate(state: InvestigationState) -> InvestigationState:
     composed = {**state, **compose_rationale(state)}
     validated = {**composed, **validate(composed)}
@@ -112,14 +98,14 @@ def _compose_then_validate(state: InvestigationState) -> InvestigationState:
 
 
 class TestGroundedRationalePasses:
-    def test_scripted_grounded_meridian_rationale_passes_with_agent_source(self, monkeypatch):
+    def test_scripted_grounded_meridian_rationale_passes_with_agent_source(self, scripted_llm):
         scripted = (
             "This transaction was flagged for three reasons. It's your first purchase from "
             "Meridian Duty-Free Traders. The $3,200 amount is 1,873% higher than your typical "
             "spend in this category. It also occurred 6,750.82 miles from Seattle, WA, your "
             "typical location."
         )
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _fake_model(scripted))
+        scripted_llm(AIMessage(content=scripted))
 
         result = _compose_then_validate(_meridian_state())
 
@@ -135,9 +121,9 @@ class TestUngroundedRationaleFails:
     to rationale_source="interim" rather than being repaired or partially
     accepted (Design Doc: never fabricate, never repair)."""
 
-    def test_invented_number_fails(self, monkeypatch):
+    def test_invented_number_fails(self, scripted_llm):
         scripted = "This transaction is $5,000 higher than your typical spend, which is unusual."
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _fake_model(scripted))
+        scripted_llm(AIMessage(content=scripted))
 
         result = _compose_then_validate(_meridian_state())
 
@@ -151,9 +137,9 @@ class TestUngroundedRationaleFails:
         # rationales) can persist what was really produced on a failure.
         assert result["composed_rationale"] == scripted
 
-    def test_wrong_unit_fails(self, monkeypatch):
+    def test_wrong_unit_fails(self, scripted_llm):
         scripted = "This occurred 10,864 miles from Seattle, WA, your typical location."
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _fake_model(scripted))
+        scripted_llm(AIMessage(content=scripted))
 
         result = _compose_then_validate(_meridian_state())
 
@@ -161,9 +147,9 @@ class TestUngroundedRationaleFails:
         assert result["rationale_source"] == "interim"
         assert any(v.violation_type == "wrong_unit" for v in result["violations"])
 
-    def test_bare_invented_place_fails(self, monkeypatch):
+    def test_bare_invented_place_fails(self, scripted_llm):
         scripted = "This looks closer to Tokyo than anywhere you usually shop."
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _fake_model(scripted))
+        scripted_llm(AIMessage(content=scripted))
 
         result = _compose_then_validate(_meridian_state())
 
@@ -181,7 +167,7 @@ class TestBlockContentResponses:
     signature included) as the "rationale"; compose_rationale now reads
     `response.text` instead, which extracts just the text-type block(s)."""
 
-    def test_extracts_only_the_text_block_ignoring_a_thinking_block(self, monkeypatch):
+    def test_extracts_only_the_text_block_ignoring_a_thinking_block(self, scripted_llm):
         block_content = [
             {"type": "thinking", "thinking": "internal reasoning", "signature": "abc123"},
             {
@@ -194,9 +180,7 @@ class TestBlockContentResponses:
                 ),
             },
         ]
-        monkeypatch.setattr(
-            graph_module, "get_chat_model", lambda: _fake_model_with_content(block_content)
-        )
+        scripted_llm(AIMessage(content=block_content))
 
         result = _compose_then_validate(_meridian_state())
 
@@ -207,12 +191,8 @@ class TestBlockContentResponses:
 
 
 class TestModelFailure:
-    def test_model_raising_records_composition_error_and_produces_no_rationale(self, monkeypatch):
-        class _RaisingModel:
-            def invoke(self, *_args, **_kwargs):
-                raise TimeoutError("simulated model timeout")
-
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+    def test_model_raising_records_composition_error_and_produces_no_rationale(self, scripted_llm):
+        scripted_llm(TimeoutError("simulated model timeout"))
 
         result = _compose_then_validate(_meridian_state())
 
@@ -227,17 +207,13 @@ class TestModelFailure:
         # failing, not a citation problem, so it must not be recorded as one.
         assert result["violations"] == []
 
-    def test_model_raising_does_not_crash_the_full_graph(self, monkeypatch):
+    def test_model_raising_does_not_crash_the_full_graph(self, scripted_llm):
         """Same failure, but through the full compiled graph (route_entry ->
         plan_tool_calls -> ... -> validate -> END) on the no-tool
         amount_deviation-only path, proving the graph completes end to end
         rather than propagating the exception."""
 
-        class _RaisingModel:
-            def invoke(self, *_args, **_kwargs):
-                raise TimeoutError("simulated model timeout")
-
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+        scripted_llm(TimeoutError("simulated model timeout"))
 
         state: InvestigationState = {
             "transaction": {
@@ -271,7 +247,7 @@ class TestModelFailure:
         assert result["composition_error"] == "ModelError: TimeoutError(-): simulated model timeout"
         assert result["violations"] == []
 
-    def test_model_raising_with_a_status_code_records_it(self, monkeypatch):
+    def test_model_raising_with_a_status_code_records_it(self, scripted_llm):
         """A real anthropic API error (e.g. a 500/503 surviving SDK
         max_retries) carries a status_code attribute -- confirms
         getattr(exc, "status_code", None) picks it up rather than always
@@ -282,11 +258,7 @@ class TestModelFailure:
                 super().__init__(message)
                 self.status_code = status_code
 
-        class _RaisingModel:
-            def invoke(self, *_args, **_kwargs):
-                raise _StatusCodedError("credential validation failed", status_code=500)
-
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+        scripted_llm(_StatusCodedError("credential validation failed", status_code=500))
 
         result = _compose_then_validate(_meridian_state())
 
@@ -294,7 +266,7 @@ class TestModelFailure:
         assert result["composition_error_label"] == "ModelError:_StatusCodedError(500)"
         assert result["violations"] == []
 
-    def test_a_real_anthropic_api_timeout_error_is_recorded_as_such(self, monkeypatch):
+    def test_a_real_anthropic_api_timeout_error_is_recorded_as_such(self, scripted_llm):
         """SCRUM-56 ticket input #1/#3: once get_chat_model()'s own SDK
         max_retries are exhausted, the exception that reaches compose_rationale
         can be a real anthropic SDK exception class -- confirms the real
@@ -302,11 +274,7 @@ class TestModelFailure:
         status_code) round-trips through the generic `except Exception`
         handling the same as any other exception, by class name."""
 
-        class _RaisingModel:
-            def invoke(self, *_args, **_kwargs):
-                raise APITimeoutError(httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
-
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+        scripted_llm(anthropic_error("timeout"))
 
         result = _compose_then_validate(_meridian_state())
 
@@ -314,14 +282,10 @@ class TestModelFailure:
         assert result["composition_error_label"] == "ModelError:APITimeoutError(-)"
         assert result["violations"] == []
 
-    def test_model_raising_a_long_message_is_truncated(self, monkeypatch):
+    def test_model_raising_a_long_message_is_truncated(self, scripted_llm):
         long_message = "x" * 1000
 
-        class _RaisingModel:
-            def invoke(self, *_args, **_kwargs):
-                raise RuntimeError(long_message)
-
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+        scripted_llm(RuntimeError(long_message))
 
         result = _compose_then_validate(_meridian_state())
 
@@ -335,11 +299,9 @@ class TestToolErrorAbortsComposition:
     SCRUM-51's original "citing a failed tool's facts still fails
     validation" behavior (which required a model call to happen first)."""
 
-    def test_tool_error_means_no_model_call_and_a_tool_error_composition_error(self, monkeypatch):
-        def _raise():
-            raise AssertionError("compose_rationale must not call get_chat_model when tool_errors is non-empty")
-
-        monkeypatch.setattr(graph_module, "get_chat_model", _raise)
+    def test_tool_error_means_no_model_call_and_a_tool_error_composition_error(self, scripted_llm):
+        # Nothing scripted: scripted_llm fails the test on any model call.
+        llm = scripted_llm()
 
         # The exact shape ToolNode(handle_tool_errors=True) produces:
         # "Error: <repr(exc)>\n Please fix your mistakes." (TOOL_CALL_ERROR_TEMPLATE).
@@ -361,12 +323,11 @@ class TestToolErrorAbortsComposition:
             "ToolError[get_geo_distance]: RuntimeError: simulated get_geo_distance failure"
         )
         assert result["composition_error_label"] == "ToolError[get_geo_distance]:RuntimeError"
+        assert llm.invocations == 0
 
-    def test_multiple_tool_errors_are_all_named(self, monkeypatch):
-        def _raise():
-            raise AssertionError("compose_rationale must not call get_chat_model when tool_errors is non-empty")
-
-        monkeypatch.setattr(graph_module, "get_chat_model", _raise)
+    def test_multiple_tool_errors_are_all_named(self, scripted_llm):
+        # Nothing scripted: scripted_llm fails the test on any model call.
+        llm = scripted_llm()
 
         state = _meridian_state(
             evidence={},
@@ -381,10 +342,11 @@ class TestToolErrorAbortsComposition:
         assert "ToolError[get_geo_distance]: RuntimeError: boom" in result["composition_error"]
         assert "ToolError[get_merchant_risk_score]: ValueError: also boom" in result["composition_error"]
         assert result["violations"] == []
+        assert llm.invocations == 0
 
 
 class TestNoToolCompositionStillRuns:
-    def test_amount_deviation_only_flag_still_composes_and_validates(self, monkeypatch):
+    def test_amount_deviation_only_flag_still_composes_and_validates(self, scripted_llm):
         """No tool call is planned for an amount_deviation-only flag (SCRUM-51), but
         composition must still run on the no-tool path -- this exercises collect_evidence ->
         compose_rationale -> validate through the real compiled graph (not called directly),
@@ -394,7 +356,7 @@ class TestNoToolCompositionStillRuns:
             "This purchase is $500 higher than your typical spend in this category, well above "
             "your usual pattern."
         )
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _fake_model(scripted))
+        scripted_llm(AIMessage(content=scripted))
 
         state: InvestigationState = {
             "transaction": {

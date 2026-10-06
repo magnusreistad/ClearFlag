@@ -19,15 +19,12 @@ be at the time.
 
 import logging
 import sys
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 
 import pytest
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from agent_fixtures import UNGROUNDED_TEXT, add_amount_deviation_outlier, seed_scenario
 from langchain_core.messages import AIMessage
 
 from app.database import SessionLocal as TestingSessionLocal
-from app.investigation_agent import graph as graph_module
 from app.investigation_agent.fingerprint import compute_fact_fingerprint
 from app.investigation_agent.payload import build_payload
 from app.investigation_agent.prompts import PROMPT_VERSION
@@ -48,64 +45,23 @@ GROUNDED_RATIONALE = (
     "This $500.00 purchase is far above your typical spend in this category, "
     "standing out clearly from your usual pattern."
 )
-UNGROUNDED_RATIONALE = "This looks like it happened in Wakanda, which is unusual."
+UNGROUNDED_RATIONALE = UNGROUNDED_TEXT
 
 
-def _fake_model_sequence(texts: list[str]):
-    """get_chat_model() is called once per composition attempt -- this
-    returns a factory that hands back a fresh single-message fake model per
-    call, consuming `texts` in order, so each attempt in a multi-transaction
-    test gets its own scripted response."""
-    texts_iter = iter(texts)
-    return lambda: GenericFakeChatModel(messages=iter([AIMessage(content=next(texts_iter))]))
-
-
-def _add_amount_deviation_outlier(db, user_id: int, *, category: str = "groceries", base_time=None) -> int:
-    base_time = base_time or datetime.now(timezone.utc)
-    history = [
-        Transaction(
-            user_id=user_id,
-            timestamp=base_time - timedelta(days=10 - i),
-            merchant="Test Merchant",
-            category=category,
-            amount=Decimal("10.00"),
-            latitude=47.6062,
-            longitude=-122.3321,
-            location_label="Seattle, WA",
-        )
-        for i in range(5)
-    ]
-    outlier = Transaction(
-        user_id=user_id,
-        timestamp=base_time,
-        merchant="Test Merchant",
-        category=category,
-        amount=Decimal("500.00"),
-        latitude=47.6062,
-        longitude=-122.3321,
-        location_label="Seattle, WA",
-    )
-    db.add_all([*history, outlier])
-    db.flush()
-    return outlier.id
+def _messages(*texts: str) -> list[AIMessage]:
+    return [AIMessage(content=text) for text in texts]
 
 
 def _seed_flagged_user() -> tuple[int, int]:
-    db = TestingSessionLocal()
-    user = User(name="Compose Script User")
-    db.add(user)
-    db.flush()
-    outlier_id = _add_amount_deviation_outlier(db, user.id)
-    db.commit()
-    user_id = user.id
-    db.close()
-    return user_id, outlier_id
+    """SCRUM-54: the shared amount_deviation scenario (tests/agent_fixtures.py)."""
+    seeded = seed_scenario("amount_deviation")
+    return seeded.user_id, seeded.primary_id
 
 
 class TestComposeAndSkip:
-    def test_composes_a_pending_transaction_and_records_a_pass(self, monkeypatch, caplog):
+    def test_composes_a_pending_transaction_and_records_a_pass(self, monkeypatch, caplog, scripted_llm):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([GROUNDED_RATIONALE]))
+        scripted_llm(*_messages(GROUNDED_RATIONALE))
         user_id, outlier_id = _seed_flagged_user()
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
 
@@ -129,16 +85,16 @@ class TestComposeAndSkip:
         assert "outcome=passed" in caplog.text
         assert f"attempt=1/{MAX_VALIDATION_ATTEMPTS}" in caplog.text
 
-    def test_second_run_skips_the_already_passing_transaction(self, monkeypatch, caplog):
+    def test_second_run_skips_the_already_passing_transaction(self, monkeypatch, caplog, scripted_llm):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([GROUNDED_RATIONALE]))
+        scripted_llm(*_messages(GROUNDED_RATIONALE))
         user_id, outlier_id = _seed_flagged_user()
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
         compose_rationales.main()
         caplog.clear()  # discard first run's output
 
         # No further scripted responses at all: if the script tried to
-        # compose again, get_chat_model would raise StopIteration.
+        # compose again, the scripted_llm fixture would fail the test.
         compose_rationales.main()
 
         db = TestingSessionLocal()
@@ -150,9 +106,9 @@ class TestComposeAndSkip:
         assert f"transaction={outlier_id}" in caplog.text
         assert "outcome=skipped_already_passing" in caplog.text
 
-    def test_records_a_failed_composition_without_crashing(self, monkeypatch, caplog):
+    def test_records_a_failed_composition_without_crashing(self, monkeypatch, caplog, scripted_llm):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([UNGROUNDED_RATIONALE]))
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         user_id, outlier_id = _seed_flagged_user()
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
 
@@ -182,15 +138,14 @@ class TestComposeAndSkip:
 
 
 class TestDryRun:
-    def test_dry_run_makes_no_model_calls_and_no_writes(self, monkeypatch, capsys):
-        def _raise():
-            raise AssertionError("dry run must never construct a chat model")
-
-        monkeypatch.setattr(graph_module, "get_chat_model", _raise)
+    def test_dry_run_makes_no_model_calls_and_no_writes(self, monkeypatch, capsys, scripted_llm):
+        llm = scripted_llm()  # nothing scripted: any model call fails the test
         user_id, outlier_id = _seed_flagged_user()
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id), "--dry-run"])
 
         compose_rationales.main()
+
+        assert llm.invocations == 0
 
         db = TestingSessionLocal()
         assert db.query(AgentRationale).count() == 0
@@ -202,19 +157,18 @@ class TestDryRun:
 
 
 class TestLimit:
-    def test_limit_bounds_how_many_are_composed_in_one_run(self, monkeypatch, caplog):
+    def test_limit_bounds_how_many_are_composed_in_one_run(self, monkeypatch, caplog, scripted_llm):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([GROUNDED_RATIONALE, GROUNDED_RATIONALE]))
+        scripted_llm(*_messages(GROUNDED_RATIONALE, GROUNDED_RATIONALE))
 
         db = TestingSessionLocal()
         user = User(name="Limit User")
         db.add(user)
         db.flush()
-        base_time = datetime.now(timezone.utc)
         # Two independent amount-deviation outliers in two different
         # categories, so this user has two separate flagged transactions.
-        _add_amount_deviation_outlier(db, user.id, category="groceries", base_time=base_time)
-        _add_amount_deviation_outlier(db, user.id, category="dining", base_time=base_time)
+        add_amount_deviation_outlier(db, user.id, category="groceries")
+        add_amount_deviation_outlier(db, user.id, category="dining")
         db.commit()
         user_id = user.id
         db.close()
@@ -230,23 +184,6 @@ class TestLimit:
         assert "run complete: passed=1 validation_failed=0 composition_error=0 skipped_capped=0 skipped_already_passing=0" in caplog.text
 
 
-class _CountingModel:
-    """Asserts a model was (or wasn't) actually invoked, without relying on
-    an exception propagating -- compose_rationale (app.investigation_agent.
-    graph) always catches a model-call exception itself and records it as a
-    composition_error, so a raising fake would never surface as a loud test
-    failure the way it does elsewhere in this file (e.g. the already-passing
-    test's StopIteration trick)."""
-
-    def __init__(self, response_text: str = UNGROUNDED_RATIONALE):
-        self.calls = 0
-        self._response_text = response_text
-
-    def invoke(self, *_args, **_kwargs):
-        self.calls += 1
-        return AIMessage(content=self._response_text)
-
-
 class TestRetryCap:
     """SCRUM-56: MAX_VALIDATION_ATTEMPTS validation-failed attempts for a
     transaction's (transaction_id, fact_fingerprint, prompt_version,
@@ -255,22 +192,21 @@ class TestRetryCap:
     and rows from a different budget key (a validator_version bump, or a
     row with validator_version IS NULL), don't count."""
 
-    def test_cap_skips_the_third_attempt_without_calling_the_model(self, monkeypatch, caplog):
+    def test_cap_skips_the_third_attempt_without_calling_the_model(self, monkeypatch, caplog, scripted_llm):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         user_id, outlier_id = _seed_flagged_user()
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
 
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([UNGROUNDED_RATIONALE]))
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         compose_rationales.main()
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([UNGROUNDED_RATIONALE]))
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         compose_rationales.main()
         caplog.clear()
 
-        counting_model = _CountingModel()
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: counting_model)
+        counting_model = scripted_llm()
         compose_rationales.main()
 
-        assert counting_model.calls == 0  # the third run never even tries
+        assert counting_model.invocations == 0  # the third run never even tries
 
         db = TestingSessionLocal()
         rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == outlier_id).all()
@@ -284,14 +220,10 @@ class TestRetryCap:
             "skipped_capped=1 skipped_already_passing=0"
         ) in caplog.text
 
-    def test_composition_error_attempts_do_not_consume_the_budget(self, monkeypatch, caplog):
+    def test_composition_error_attempts_do_not_consume_the_budget(self, monkeypatch, caplog, scripted_llm):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         user_id, outlier_id = _seed_flagged_user()
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
-
-        class _RaisingModel:
-            def invoke(self, *_args, **_kwargs):
-                raise TimeoutError("simulated model timeout")
 
         # Three runs, each a model failure -- if composition_error consumed
         # the same budget as a validation failure, the third would be capped
@@ -300,7 +232,7 @@ class TestRetryCap:
         # that's exercised for its own sake in TestExitCode below, so it's
         # just caught and ignored here.
         for _ in range(3):
-            monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+            scripted_llm(TimeoutError("simulated model timeout"))
             with pytest.raises(SystemExit) as exc_info:
                 compose_rationales.main()
             assert exc_info.value.code == 1
@@ -313,28 +245,27 @@ class TestRetryCap:
 
         assert "outcome=skipped_capped" not in caplog.text
 
-    def test_validator_version_bump_resets_the_budget(self, monkeypatch, caplog):
+    def test_validator_version_bump_resets_the_budget(self, monkeypatch, caplog, scripted_llm):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         user_id, outlier_id = _seed_flagged_user()
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
 
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([UNGROUNDED_RATIONALE]))
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         compose_rationales.main()
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([UNGROUNDED_RATIONALE]))
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         compose_rationales.main()
         caplog.clear()
 
         # Confirm it really is capped under the current validator version first.
-        counting_model = _CountingModel()
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: counting_model)
+        counting_model = scripted_llm()
         compose_rationales.main()
-        assert counting_model.calls == 0
+        assert counting_model.invocations == 0
         caplog.clear()
 
         # A VALIDATOR_VERSION bump changes the budget key -- the two capped
         # attempts above no longer match it, so the budget is fresh again.
         monkeypatch.setattr(compose_rationales, "VALIDATOR_VERSION", "v99-test")
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([GROUNDED_RATIONALE]))
+        scripted_llm(*_messages(GROUNDED_RATIONALE))
         compose_rationales.main()
 
         db = TestingSessionLocal()
@@ -350,7 +281,7 @@ class TestRetryCap:
         assert rows[-1].validation_passed is True
         assert "outcome=passed" in caplog.text
 
-    def test_null_validator_version_row_does_not_consume_budget(self, monkeypatch, caplog):
+    def test_null_validator_version_row_does_not_consume_budget(self, monkeypatch, caplog, scripted_llm):
         """A row written before the validator_version column existed
         (validator_version IS NULL) never matches VALIDATOR_VERSION by
         exact-equality, so it doesn't count toward the cap -- confirmed here
@@ -389,7 +320,7 @@ class TestRetryCap:
         db.close()
 
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([GROUNDED_RATIONALE]))
+        scripted_llm(*_messages(GROUNDED_RATIONALE))
 
         compose_rationales.main()
 
@@ -400,7 +331,7 @@ class TestRetryCap:
         assert "outcome=skipped_capped" not in caplog.text
         assert "outcome=passed" in caplog.text
 
-    def test_capped_transactions_dont_count_against_limit(self, monkeypatch, caplog):
+    def test_capped_transactions_dont_count_against_limit(self, monkeypatch, caplog, scripted_llm):
         """Capping filters happen in _collect_pending, BEFORE --limit slices
         the pending list -- a capped transaction must not use up a run slot
         that a transaction still worth attempting could have had."""
@@ -410,27 +341,26 @@ class TestRetryCap:
         user = User(name="Cap Limit User")
         db.add(user)
         db.flush()
-        base_time = datetime.now(timezone.utc)
-        capped_id = _add_amount_deviation_outlier(db, user.id, category="groceries", base_time=base_time)
+        capped_id = add_amount_deviation_outlier(db, user.id, category="groceries")
         db.commit()
         user_id = user.id
         db.close()
 
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([UNGROUNDED_RATIONALE]))
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         compose_rationales.main()
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([UNGROUNDED_RATIONALE]))
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         compose_rationales.main()
         caplog.clear()
 
         # A second, fresh outlier for the same user, added after the first is capped.
         db = TestingSessionLocal()
-        fresh_id = _add_amount_deviation_outlier(db, user_id, category="dining", base_time=base_time)
+        fresh_id = add_amount_deviation_outlier(db, user_id, category="dining")
         db.commit()
         db.close()
 
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id), "--limit", "1"])
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([GROUNDED_RATIONALE]))
+        scripted_llm(*_messages(GROUNDED_RATIONALE))
         compose_rationales.main()
 
         db = TestingSessionLocal()
@@ -449,16 +379,15 @@ class TestRetryCap:
 
 
 class TestOneFailureDoesntStopTheRest:
-    def test_one_transactions_model_error_doesnt_stop_the_others_in_the_run(self, monkeypatch, caplog):
+    def test_one_transactions_model_error_doesnt_stop_the_others_in_the_run(self, monkeypatch, caplog, scripted_llm):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
 
         db = TestingSessionLocal()
         user = User(name="Mixed Outcome User")
         db.add(user)
         db.flush()
-        base_time = datetime.now(timezone.utc)
-        failing_id = _add_amount_deviation_outlier(db, user.id, category="groceries", base_time=base_time)
-        passing_id = _add_amount_deviation_outlier(db, user.id, category="dining", base_time=base_time)
+        failing_id = add_amount_deviation_outlier(db, user.id, category="groceries")
+        passing_id = add_amount_deviation_outlier(db, user.id, category="dining")
         db.commit()
         user_id = user.id
         db.close()
@@ -467,16 +396,7 @@ class TestOneFailureDoesntStopTheRest:
         # groceries outlier (added first, lower id) is composed before the
         # dining one -- scripting the model to fail on the first call and
         # succeed on the second exercises exactly that ordering.
-        responses = iter([TimeoutError("simulated model timeout"), GROUNDED_RATIONALE])
-
-        class _SequencedModel:
-            def invoke(self, *_args, **_kwargs):
-                response = next(responses)
-                if isinstance(response, Exception):
-                    raise response
-                return AIMessage(content=response)
-
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _SequencedModel())
+        scripted_llm(TimeoutError("simulated model timeout"), *_messages(GROUNDED_RATIONALE))
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
 
         with pytest.raises(SystemExit) as exc_info:
@@ -497,34 +417,29 @@ class TestOneFailureDoesntStopTheRest:
 
 
 class TestExitCode:
-    def test_exits_zero_when_every_attempt_passes(self, monkeypatch):
+    def test_exits_zero_when_every_attempt_passes(self, monkeypatch, scripted_llm):
         user_id, _outlier_id = _seed_flagged_user()
-        monkeypatch.setattr(graph_module, "get_chat_model", _fake_model_sequence([GROUNDED_RATIONALE]))
+        scripted_llm(*_messages(GROUNDED_RATIONALE))
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
 
         compose_rationales.main()  # would raise SystemExit if it tried to exit non-zero
 
-    def test_exits_non_zero_when_a_composition_error_occurs(self, monkeypatch):
+    def test_exits_non_zero_when_a_composition_error_occurs(self, monkeypatch, scripted_llm):
         user_id, _outlier_id = _seed_flagged_user()
 
-        class _RaisingModel:
-            def invoke(self, *_args, **_kwargs):
-                raise TimeoutError("simulated model timeout")
-
-        monkeypatch.setattr(graph_module, "get_chat_model", lambda: _RaisingModel())
+        scripted_llm(TimeoutError("simulated model timeout"))
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
 
         with pytest.raises(SystemExit) as exc_info:
             compose_rationales.main()
         assert exc_info.value.code == 1
 
-    def test_dry_run_always_exits_zero_even_with_pending_work(self, monkeypatch):
+    def test_dry_run_always_exits_zero_even_with_pending_work(self, monkeypatch, scripted_llm):
         user_id, _outlier_id = _seed_flagged_user()
 
-        def _raise():
-            raise AssertionError("dry run must never construct a chat model")
-
-        monkeypatch.setattr(graph_module, "get_chat_model", _raise)
+        llm = scripted_llm()  # nothing scripted: any model call fails the test
         monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id), "--dry-run"])
 
         compose_rationales.main()  # would raise SystemExit if it tried to exit non-zero
+
+        assert llm.invocations == 0

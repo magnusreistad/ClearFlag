@@ -70,9 +70,20 @@ def _seed_velocity(user_id):
     return burst, burst[-1]
 
 
-def _seed_amount_deviation(user_id):
-    outlier = _txn(user_id, BASE_TIME, amount="500.00")
-    return [*_daily(user_id, 5), outlier], outlier
+def _seed_amount_deviation(user_id, *, category: str = "groceries"):
+    outlier = _txn(user_id, BASE_TIME, category=category, amount="500.00")
+    return [*_daily(user_id, 5, category=category), outlier], outlier
+
+
+def add_amount_deviation_outlier(db, user_id: int, *, category: str = "groceries") -> int:
+    """The amount_deviation scenario's rows for an existing user, in
+    `category` -- for tests that need several independent flagged
+    transactions for one user (one per category). Flushes; returns the
+    outlier's id."""
+    transactions, outlier = _seed_amount_deviation(user_id, category=category)
+    db.add_all(transactions)
+    db.flush()
+    return outlier.id
 
 
 def _seed_new_merchant_risk(user_id):
