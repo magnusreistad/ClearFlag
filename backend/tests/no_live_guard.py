@@ -30,7 +30,11 @@ from collections.abc import Mapping
 import pytest
 
 LLM_MODE_VAR = "INVESTIGATION_AGENT_LLM_MODE"
-TRACING_VARS = ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2")
+# Every name langsmith reads its tracing switch from (SCRUM-75). A copy of
+# app.investigation_agent.tracing.TRACING_ENV_VARS rather than an import --
+# this module runs before any app import -- kept equal to it by
+# test_no_live_calls.py.
+TRACING_VARS = ("LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING", "LANGCHAIN_TRACING")
 API_KEY_VARS = ("ANTHROPIC_API_KEY", "LANGSMITH_API_KEY", "LANGCHAIN_API_KEY")
 
 
