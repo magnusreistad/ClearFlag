@@ -5,8 +5,8 @@ graph. It governs the LLM only -- tool selection stays deterministic
 (app.investigation_agent.graph.plan_tool_calls) and the tools themselves keep
 hitting the real DB via SessionLocal (SCRUM-48-51) regardless of this
 toggle; there is no mock mode for tools, since the database a tool queries
-is already swapped out per-environment (real Postgres vs. the SQLite test
-engine), not something this LLM toggle should also govern.
+is already swapped out per-environment (Neon vs. the local test Postgres),
+not something this LLM toggle should also govern.
 
 INVESTIGATION_AGENT_LLM_MODE selects "mock" (default) or "live". Unset,
 blank, or any other value never resolves to live -- mock is the fallback for

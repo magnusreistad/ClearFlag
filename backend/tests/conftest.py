@@ -25,6 +25,10 @@ instead of hanging the run.
 Tests that change the schema itself use `scratch_database_url` /
 `migrated_scratch_database_url`: a throwaway database created and dropped
 around that one test, so they can never break the shared schema.
+
+No live calls, ever (SCRUM-54, see tests/no_live_guard.py): the environment
+is checked right after load_dotenv(), before anything imports app.*, and an
+autouse session fixture blocks all non-loopback network access.
 """
 
 import os
@@ -32,10 +36,12 @@ import uuid
 
 import pytest
 from dotenv import load_dotenv
+from no_live_guard import enforce_environment, install_network_block
 
 # Lets TEST_DATABASE_URL live in backend/.env alongside DATABASE_URL; a value
 # already in the environment (e.g. CI's) still wins.
 load_dotenv()
+enforce_environment()
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 if not TEST_DATABASE_URL:
     raise pytest.UsageError(
@@ -74,7 +80,15 @@ def alembic_config() -> Config:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def migrated_schema():
+def block_outbound_network():
+    """Defined first so it's in place before any other session fixture runs."""
+    with pytest.MonkeyPatch.context() as mp:
+        install_network_block(mp)
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def migrated_schema(block_outbound_network):
     """Rebuilds the shared test database from nothing via the migrations, so
     every run starts from exactly what `alembic upgrade head` produces."""
     with engine.begin() as conn:
@@ -91,6 +105,24 @@ def clean_tables(migrated_schema):
     with engine.begin() as conn:
         conn.execute(text(f"SET LOCAL lock_timeout = '{TRUNCATE_LOCK_TIMEOUT}'"))
         conn.execute(text(f"TRUNCATE {table_names} RESTART IDENTITY CASCADE"))
+
+
+@pytest.fixture
+def scripted_llm(monkeypatch):
+    """SCRUM-54: scripted_llm(*responses) installs a tests/agent_fixtures.py
+    ScriptedLLM and returns it; may be called again mid-test to re-script.
+    Fails the test if any model call went unscripted."""
+    from agent_fixtures import ScriptedLLM
+
+    installed = []
+
+    def install(*responses):
+        scripted = ScriptedLLM(responses).install(monkeypatch)
+        installed.append(scripted)
+        return scripted
+
+    yield install
+    assert sum(s.unscripted_calls for s in installed) == 0, "a model call was made that the test didn't script"
 
 
 @pytest.fixture

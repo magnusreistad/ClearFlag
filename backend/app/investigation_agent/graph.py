@@ -90,9 +90,9 @@ def _tool_session():
     """Opens a SessionLocal() session for a tool's DB query, applying
     DEFAULT_TOOL_DB_TIMEOUT_MS (or INVESTIGATION_AGENT_TOOL_DB_TIMEOUT_MS)
     as a Postgres `SET LOCAL statement_timeout` on that session alone.
-    No-op on SQLite (this project's test engine and the only other dialect
-    in use): SQLite has no statement_timeout equivalent, and a `SET LOCAL`
-    here would just fail against it. timeout_ms is validated by int() (a
+    Skipped for any non-Postgres dialect, which has no statement_timeout
+    equivalent (every environment, tests included, runs Postgres since
+    SCRUM-67). timeout_ms is validated by int() (a
     bad env var is a config error, surfaced immediately) before going into
     the SQL text, so this is never user-controlled string interpolation.
     """
