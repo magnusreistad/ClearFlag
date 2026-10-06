@@ -19,7 +19,17 @@ describe('splitRationale', () => {
     ])
   })
 
+  it('returns the whole trimmed text as one item when there is no "Flagged: " marker', () => {
+    expect(splitRationale('  This $340.00 charge was flagged for two reasons.  ')).toEqual([
+      'This $340.00 charge was flagged for two reasons.',
+    ])
+  })
+
   it('returns an empty array for an empty string', () => {
     expect(splitRationale('')).toEqual([])
+  })
+
+  it('returns an empty array for a whitespace-only string', () => {
+    expect(splitRationale('  \n ')).toEqual([])
   })
 })

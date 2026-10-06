@@ -73,6 +73,16 @@ describe('TransactionFeed', () => {
     expect(await screen.findByText('Whole Foods Market')).toBeInTheDocument()
   })
 
+  it('renders no flag badge for a flagged transaction with an empty rationale', async () => {
+    mockedFetchTransactions.mockResolvedValue(
+      makeResponse([makeTransaction({ is_flagged: true, rationale: '', rule_names: ['amount_deviation'] })]),
+    )
+    render(<TransactionFeed />)
+
+    expect(await screen.findByText('Whole Foods Market')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /flagged/i })).not.toBeInTheDocument()
+  })
+
   it('shows a Load more button when more transactions exist, and fetches the next page', async () => {
     mockedFetchTransactions.mockResolvedValueOnce(
       makeResponse([makeTransaction({ id: 1 })], { total: 2 }),

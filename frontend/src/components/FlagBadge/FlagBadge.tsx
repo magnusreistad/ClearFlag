@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { splitRationale } from '../../lib/rationale'
+import { FLAG_MARKER, splitRationale } from '../../lib/rationale'
 import styles from './FlagBadge.module.css'
 
 interface FlagBadgeProps {
@@ -10,15 +10,24 @@ interface FlagBadgeProps {
   onOpenChange: (open: boolean) => void
 }
 
-const PANEL_WIDTH = 280
 const VIEWPORT_MARGIN = 16
+// A flag with no explanation text still keeps its badge (the flag and its
+// severity are real); the panel says so rather than opening empty.
+const NO_RATIONALE_FALLBACK = 'No explanation is available for this flag.'
 
 // Rule count comes from `ruleNames` (one entry per hit, API-provided -
-// SCRUM-64) rather than from splitting `rationale`. The individual reason
-// text still comes from splitRationale since the API exposes one combined
-// rationale string, not per-rule text. Exposed here via data-rule-count so
-// SCRUM-26's severity treatment has a hook to key off of without re-deriving
-// it.
+// SCRUM-64) rather than from the rationale text, and it only drives
+// data-rule-count, the hook SCRUM-26's severity treatment keys off.
+//
+// The panel's layout is decided from the text alone (SCRUM-57), since the
+// API doesn't say which of the two rationale shapes it served (see
+// lib/rationale.ts). Interim formatter text - trimmed text starting with
+// "Flagged: " - with more than one segment renders as a list, one reason
+// per segment; a single interim segment renders as a paragraph without its
+// prefix. Anything else is an agent paragraph and renders whole, including
+// a multi-rule one, which is one composed paragraph rather than per-rule
+// sentences. Requiring the leading marker keeps an agent paragraph that
+// happens to contain "Flagged: " mid-text from being split into bullets.
 export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBadgeProps) {
   const buttonRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -27,16 +36,26 @@ export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBa
   // viewport rect rather than rendered as a CSS-absolute child - otherwise
   // the list's `overflow: hidden` cuts it off.
   const [panelPosition, setPanelPosition] = useState<{ top: number; left: number } | null>(null)
+  const trimmedRationale = rationale.trim()
   const reasons = useMemo(() => splitRationale(rationale), [rationale])
   const ruleCount = ruleNames.length
+  const isInterimFormat = trimmedRationale.startsWith(FLAG_MARKER)
+  const isReasonList = isInterimFormat && reasons.length > 1
+  const paragraph = (isInterimFormat ? reasons[0] : trimmedRationale) || NO_RATIONALE_FALLBACK
 
+  // The panel renders hidden for one layout pass so its real width can be
+  // measured before it's placed - `.panel` is content-box, so its padding
+  // and border sit outside the 280px CSS width, and clamping against 280
+  // let it run ~14px past the right edge on narrow viewports. Both passes
+  // happen before paint.
   useLayoutEffect(() => {
-    if (!isOpen || !buttonRef.current) {
+    if (!isOpen || !buttonRef.current || !panelRef.current) {
       setPanelPosition(null)
       return
     }
     const rect = buttonRef.current.getBoundingClientRect()
-    const left = Math.min(rect.left, window.innerWidth - PANEL_WIDTH - VIEWPORT_MARGIN)
+    const panelWidth = panelRef.current.getBoundingClientRect().width
+    const left = Math.min(rect.left, window.innerWidth - panelWidth - VIEWPORT_MARGIN)
     setPanelPosition({ top: rect.bottom + 6, left: Math.max(VIEWPORT_MARGIN, left) })
   }, [isOpen])
 
@@ -83,18 +102,15 @@ export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBa
         Flagged
       </button>
       {isOpen &&
-        panelPosition &&
         createPortal(
           <div
             ref={panelRef}
             className={styles.panel}
             role="region"
             aria-label="Why this transaction was flagged"
-            style={{ top: panelPosition.top, left: panelPosition.left }}
+            style={panelPosition ? { top: panelPosition.top, left: panelPosition.left } : { visibility: 'hidden' }}
           >
-            {ruleCount === 1 ? (
-              <p className={styles.singleReason}>{reasons[0]}</p>
-            ) : (
+            {isReasonList ? (
               <ul className={styles.reasonList}>
                 {reasons.map((reason, index) => (
                   <li key={index} className={styles.reasonItem}>
@@ -102,6 +118,8 @@ export function FlagBadge({ rationale, ruleNames, isOpen, onOpenChange }: FlagBa
                   </li>
                 ))}
               </ul>
+            ) : (
+              <p className={styles.singleReason}>{paragraph}</p>
             )}
           </div>,
           document.body,
