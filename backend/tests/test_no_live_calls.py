@@ -10,11 +10,12 @@ import langsmith
 import langsmith.utils
 import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from no_live_guard import API_KEY_VARS, LiveCallBlocked, check_environment
+from no_live_guard import API_KEY_VARS, TRACING_VARS, LiveCallBlocked, check_environment
 from sqlalchemy import text
 
 from app.database import engine
 from app.investigation_agent.llm import get_chat_model
+from app.investigation_agent.tracing import TRACING_ENV_VARS
 
 
 def _blocked_by_guard(exc: BaseException) -> bool:
@@ -86,12 +87,22 @@ def test_postgres_still_works_under_the_guard():
         ({"INVESTIGATION_AGENT_LLM_MODE": " Live "}, False, ["INVESTIGATION_AGENT_LLM_MODE=live"], []),
         ({"LANGSMITH_TRACING": "true"}, False, ["LANGSMITH_TRACING is truthy"], []),
         ({"LANGCHAIN_TRACING_V2": "1"}, True, ["LANGCHAIN_TRACING_V2 is truthy"], []),
+        ({"LANGSMITH_TRACING_V2": "true"}, True, ["LANGSMITH_TRACING_V2 is truthy"], []),
+        ({"LANGCHAIN_TRACING": "true"}, False, ["LANGCHAIN_TRACING is truthy"], []),
         ({"ANTHROPIC_API_KEY": "sk-x", "LANGSMITH_API_KEY": "ls-x"}, True,
          ["ANTHROPIC_API_KEY is set", "LANGSMITH_API_KEY is set"], []),
         ({"ANTHROPIC_API_KEY": "sk-x", "LANGCHAIN_API_KEY": "lc-x"}, False, [], ["ANTHROPIC_API_KEY", "LANGCHAIN_API_KEY"]),
         ({"ANTHROPIC_API_KEY": "", "LANGSMITH_TRACING": "false"}, True, [], []),
     ],
-    ids=["ci-clean", "local-live", "local-tracing", "ci-legacy-tracing", "ci-keys-fail", "local-keys-removed", "empty-is-unset"],
+    ids=["ci-clean", "local-live", "local-tracing", "ci-legacy-tracing", "ci-tracing-v2", "local-legacy-tracing-v1",
+         "ci-keys-fail", "local-keys-removed", "empty-is-unset"],
 )
 def test_check_environment(environ, ci, expect_errors, expect_removed):
     assert check_environment(environ, ci=ci) == (expect_errors, expect_removed)
+
+
+def test_guard_checks_every_tracing_name_the_app_enforces():
+    """SCRUM-75: the guard keeps its own copy of the tracing switch names
+    (it can't import app code), so a name added to the app's CI enforcement
+    must be added to the guard's startup check too."""
+    assert TRACING_VARS == TRACING_ENV_VARS
