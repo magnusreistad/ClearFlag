@@ -108,6 +108,24 @@ def clean_tables(migrated_schema):
 
 
 @pytest.fixture
+def scripted_llm(monkeypatch):
+    """SCRUM-54: scripted_llm(*responses) installs a tests/agent_fixtures.py
+    ScriptedLLM and returns it; may be called again mid-test to re-script.
+    Fails the test if any model call went unscripted."""
+    from agent_fixtures import ScriptedLLM
+
+    installed = []
+
+    def install(*responses):
+        scripted = ScriptedLLM(responses).install(monkeypatch)
+        installed.append(scripted)
+        return scripted
+
+    yield install
+    assert sum(s.unscripted_calls for s in installed) == 0, "a model call was made that the test didn't script"
+
+
+@pytest.fixture
 def scratch_database_url():
     """An empty, throwaway database on the same server as TEST_DATABASE_URL,
     dropped (connections and all) after the test."""
