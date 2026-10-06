@@ -17,7 +17,6 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import SessionLocal as TestingSessionLocal
 from app.database import get_db
-from app.investigation_agent import llm as llm_module
 from app.investigation_agent.fingerprint import compute_fact_fingerprint
 from app.investigation_agent.payload import build_payload
 from app.investigation_agent.prompts import PROMPT_VERSION
@@ -212,20 +211,10 @@ def test_prompt_version_mismatch_serves_the_interim_rationale():
     assert "higher than your typical spend" in items_by_id[outlier_id]["rationale"]
 
 
-def test_refresh_makes_zero_model_calls(monkeypatch):
-    """Even on a guaranteed miss (no agent_rationales row at all), GET
-    /transactions must never construct a chat model -- composition only
-    ever happens in scripts.compose_rationales."""
-
-    def _raise():
-        raise AssertionError("GET /transactions must never construct a chat model")
-
-    monkeypatch.setattr(llm_module, "get_chat_model", _raise)
-    user_id, _outlier_id, _fingerprint = _seed_flagged_transaction()
-
-    response = client.get("/transactions", params={"user_id": user_id})
-
-    assert response.status_code == 200
+# SCRUM-54: the zero-model-calls check that used to live here patched
+# llm.get_chat_model, which graph.py binds by name at import, so it could
+# never fail. Replaced by test_investigation_agent_pipeline.py's
+# test_get_makes_zero_model_calls_and_zero_graph_invocations.
 
 
 def test_refresh_makes_zero_writes_to_agent_rationales():
