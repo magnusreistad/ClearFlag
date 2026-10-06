@@ -63,6 +63,35 @@ def test_enforce_no_tracing_in_ci_overrides_both_env_vars_in_place(monkeypatch):
     assert os.environ["LANGCHAIN_TRACING_V2"] == "false"
 
 
+@pytest.fixture
+def _langsmith_env_cache_cleared():
+    import langsmith.utils
+
+    langsmith.utils.get_env_var.cache_clear()
+    yield
+    # monkeypatch restores os.environ, but langsmith caches what it read --
+    # clear it so a "true" read here can't leak into later tests.
+    langsmith.utils.get_env_var.cache_clear()
+
+
+@pytest.mark.xfail(strict=True, reason="<NEW-TICKET>: langsmith env cache; enforcement runs after graph.invoke")
+def test_enforce_no_tracing_in_ci_turns_off_langsmiths_own_tracing_check(monkeypatch, _langsmith_env_cache_cleared):
+    """SCRUM-54 finding. enforce_no_tracing_in_ci() only rewrites os.environ,
+    but langsmith reads tracing env vars through an lru_cache'd get_env_var
+    -- and a graph run reads them at graph.invoke time, before
+    compose_rationale ever calls enforce_no_tracing_in_ci(). The first
+    tracing_is_enabled() call below stands in for that earlier read."""
+    import langsmith.utils
+
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("CI", "true")
+    langsmith.utils.tracing_is_enabled()
+
+    enforce_no_tracing_in_ci()
+
+    assert langsmith.utils.tracing_is_enabled() is False
+
+
 def test_enforce_no_tracing_in_ci_is_a_noop_outside_ci(monkeypatch):
     import os
 
