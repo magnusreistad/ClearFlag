@@ -10,7 +10,8 @@ app = FastAPI(title="ClearFlag API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
-    allow_methods=["GET"],
+    # POST for /transactions/{id}/disposition (SCRUM-29).
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
