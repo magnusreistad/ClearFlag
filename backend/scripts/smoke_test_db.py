@@ -7,7 +7,7 @@ datetime for timestamp) round-trip correctly. Cleans up after itself.
 Run with: python -m scripts.smoke_test_db
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.database import SessionLocal
@@ -23,7 +23,7 @@ def main() -> None:
 
         transaction = Transaction(
             user_id=user.id,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             merchant="Test Merchant",
             category="groceries",
             amount=Decimal("42.50"),

@@ -20,7 +20,7 @@ Skip the confirmation prompt (e.g. in automation): python -m scripts.seed_transa
 
 import argparse
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.database import DATABASE_URL, SessionLocal
@@ -345,7 +345,7 @@ def main() -> None:
         ).delete(synchronize_session=False)
         deleted = db.query(Transaction).filter(Transaction.user_id == user.id).delete(synchronize_session=False)
 
-        start_date = datetime.now(timezone.utc).replace(
+        start_date = datetime.now(UTC).replace(
             hour=0, minute=0, second=0, microsecond=0
         ) - timedelta(days=DAYS_OF_HISTORY - 1)
 

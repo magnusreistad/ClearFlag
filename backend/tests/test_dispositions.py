@@ -7,7 +7,7 @@ TransactionFlag row on every GET, and a disposition must survive that --
 see test_disposition_survives_a_flag_refresh.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import get_args
 
@@ -35,7 +35,7 @@ client = TestClient(app)
 def make_transaction(user_id: int, days_ago: int, amount: Decimal) -> Transaction:
     return Transaction(
         user_id=user_id,
-        timestamp=datetime.now(timezone.utc) - timedelta(days=days_ago),
+        timestamp=datetime.now(UTC) - timedelta(days=days_ago),
         merchant="Test Merchant",
         category="groceries",
         amount=amount,

@@ -10,7 +10,7 @@ it failed with "unknown function: now()". The insert test below is the
 check SQLite could never pass.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -30,7 +30,7 @@ ROWS_WITHOUT_CREATED_AT = {
     "users": {"name": "Migration Check User"},
     "transactions": {
         "user_id": 1,
-        "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
         "merchant": "Migration Check Merchant",
         "category": "groceries",
         "amount": Decimal("10.00"),

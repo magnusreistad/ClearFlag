@@ -5,7 +5,7 @@ test_investigation_agent_llm.py's test_live_mode_in_ci_raises_even_with_a_key_se
 tracing instead of the model call itself.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import langchain_core.tracers.langchain
@@ -158,7 +158,7 @@ def _amount_deviation_only_state() -> InvestigationState:
         "transaction": {
             "id": 75,
             "user_id": 1,
-            "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
             "merchant": "Test Merchant",
             "category": "shopping",
             "amount": Decimal("500.00"),
