@@ -25,6 +25,7 @@ function makeTransaction(overrides: Partial<Transaction> = {}): Transaction {
     is_flagged: false,
     rationale: null,
     rule_names: [],
+    disposition: null,
     ...overrides,
   }
 }
