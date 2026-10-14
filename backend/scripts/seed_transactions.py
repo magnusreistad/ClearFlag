@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.database import DATABASE_URL, SessionLocal
-from app.models import Transaction, TransactionFlag, User
+from app.models import Transaction, TransactionDisposition, TransactionFlag, User
 
 SEED = 42
 DAYS_OF_HISTORY = 95  # comfortably over the 90-day acceptance criterion
@@ -331,6 +331,15 @@ def main() -> None:
         # endpoint), deleting transactions first would violate that FK.
         db.query(TransactionFlag).filter(
             TransactionFlag.transaction_id.in_(
+                db.query(Transaction.id).filter(Transaction.user_id == user.id)
+            )
+        ).delete(synchronize_session=False)
+        # SCRUM-29: same FK constraint, and deliberately NO ACTION rather
+        # than cascade -- dispositions are an append-only audit log the app
+        # never deletes from, so wiping them is something only this
+        # regenerate-everything script does, explicitly.
+        db.query(TransactionDisposition).filter(
+            TransactionDisposition.transaction_id.in_(
                 db.query(Transaction.id).filter(Transaction.user_id == user.id)
             )
         ).delete(synchronize_session=False)
