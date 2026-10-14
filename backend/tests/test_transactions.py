@@ -1,5 +1,5 @@
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -16,7 +16,7 @@ def make_transaction(
 ) -> Transaction:
     return Transaction(
         user_id=user_id,
-        timestamp=datetime.now(timezone.utc) - timedelta(days=days_ago),
+        timestamp=datetime.now(UTC) - timedelta(days=days_ago),
         merchant=merchant,
         category="groceries",
         amount=amount,
@@ -125,7 +125,7 @@ def test_transaction_triggering_multiple_rules_concatenates_rationale():
     user = User(name="Multi Rule Flag User")
     db.add(user)
     db.flush()
-    base_time = datetime.now(timezone.utc) - timedelta(hours=1)
+    base_time = datetime.now(UTC) - timedelta(hours=1)
     # 6 transactions within 10 minutes trips velocity for all 6; the 6th is
     # also a $500 outlier against the $10 history the first 5 establish in
     # the same category, tripping amount deviation too.

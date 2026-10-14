@@ -13,7 +13,7 @@ transaction snapshot alone.
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import ClassVar
@@ -41,7 +41,7 @@ FIXTURE_PATH = Path(__file__).parent / "fixtures" / "investigation_agent_meridia
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 
 
-BASE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
+BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def new_user(db: Session) -> int:

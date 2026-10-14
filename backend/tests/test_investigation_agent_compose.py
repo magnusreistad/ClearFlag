@@ -12,7 +12,7 @@ these tests are about what compose_rationale/validate do with a *specific* model
 about llm.py's own mock/live toggle (covered by test_investigation_agent_llm.py).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from agent_fixtures import anthropic_error
@@ -29,7 +29,7 @@ from app.investigation_agent.state import InvestigationState
 MERIDIAN_TRANSACTION = {
     "id": 843,
     "user_id": 2,
-    "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+    "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
     "merchant": "Meridian Duty-Free Traders",
     "category": "shopping",
     "amount": Decimal("3200.00"),
@@ -219,7 +219,7 @@ class TestModelFailure:
             "transaction": {
                 "id": 2,
                 "user_id": 1,
-                "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
                 "merchant": "Test Merchant",
                 "category": "shopping",
                 "amount": Decimal("500.00"),
@@ -362,7 +362,7 @@ class TestNoToolCompositionStillRuns:
             "transaction": {
                 "id": 2,
                 "user_id": 1,
-                "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
                 "merchant": "Test Merchant",
                 "category": "shopping",
                 "amount": Decimal("500.00"),

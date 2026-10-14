@@ -1,11 +1,11 @@
-fastapi
+fastapi==0.141.1
 uvicorn[standard]
-sqlalchemy
-alembic
-psycopg2-binary
-pydantic
+SQLAlchemy==2.0.51
+alembic==1.19.1
+psycopg2-binary==2.9.12
+pydantic==2.13.4
 python-dotenv
-httpx
+httpx==0.28.1
 anthropic==0.121.0
 langchain-anthropic==1.5.4
 langchain-core==1.5.3

@@ -20,11 +20,11 @@ Skip the confirmation prompt (e.g. in automation): python -m scripts.seed_transa
 
 import argparse
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.database import DATABASE_URL, SessionLocal
-from app.models import Transaction, TransactionFlag, User
+from app.models import Transaction, TransactionDisposition, TransactionFlag, User
 
 SEED = 42
 DAYS_OF_HISTORY = 95  # comfortably over the 90-day acceptance criterion
@@ -334,9 +334,18 @@ def main() -> None:
                 db.query(Transaction.id).filter(Transaction.user_id == user.id)
             )
         ).delete(synchronize_session=False)
+        # SCRUM-29: same FK constraint, and deliberately NO ACTION rather
+        # than cascade -- dispositions are an append-only audit log the app
+        # never deletes from, so wiping them is something only this
+        # regenerate-everything script does, explicitly.
+        db.query(TransactionDisposition).filter(
+            TransactionDisposition.transaction_id.in_(
+                db.query(Transaction.id).filter(Transaction.user_id == user.id)
+            )
+        ).delete(synchronize_session=False)
         deleted = db.query(Transaction).filter(Transaction.user_id == user.id).delete(synchronize_session=False)
 
-        start_date = datetime.now(timezone.utc).replace(
+        start_date = datetime.now(UTC).replace(
             hour=0, minute=0, second=0, microsecond=0
         ) - timedelta(days=DAYS_OF_HISTORY - 1)
 

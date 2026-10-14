@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -68,7 +68,7 @@ def test_scrum_65_triple_rule_transaction_fans_out_to_its_two_mapped_tool_branch
     from the rules engine's invocation payload). So this transaction should
     visit exactly get_merchant_risk_score and get_geo_distance.
     """
-    start_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start_date = datetime(2026, 1, 1, tzinfo=UTC)
     [(seed_transaction, _)] = generate_triple_rule_fraud(user_id=1, start_date=start_date)
 
     state: InvestigationState = {
@@ -102,7 +102,7 @@ def test_velocity_only_flag_visits_get_transaction_history_branch():
     burst that doesn't compose with a single planted transaction. A
     separate synthetic single-rule case exercises this branch instead.
     """
-    anchor = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    anchor = datetime(2026, 1, 1, tzinfo=UTC)
     state: InvestigationState = {
         "transaction": {
             "id": 1,
@@ -142,7 +142,7 @@ def test_amount_deviation_only_flag_has_no_tool_and_routes_straight_to_collect_e
         "transaction": {
             "id": 2,
             "user_id": 1,
-            "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
             "merchant": "Test Merchant",
             "category": "shopping",
             "amount": Decimal("500.00"),
@@ -175,7 +175,7 @@ class TestPlanToolCalls:
             "transaction": {
                 "id": 42,
                 "user_id": 7,
-                "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
                 "merchant": "Meridian Duty-Free Traders",
                 "category": "shopping",
                 "amount": Decimal("500.00"),
@@ -203,7 +203,7 @@ class TestPlanToolCalls:
             "transaction": {
                 "id": 2,
                 "user_id": 1,
-                "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
                 "merchant": "Test Merchant",
                 "category": "shopping",
                 "amount": Decimal("500.00"),
@@ -232,7 +232,7 @@ def test_tool_exception_is_isolated_and_recorded_in_tool_errors(monkeypatch):
     must still complete and populate its own evidence key, proving the two
     parallel tool failures/successes are isolated from each other.
     """
-    start_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start_date = datetime(2026, 1, 1, tzinfo=UTC)
     [(seed_transaction, _)] = generate_triple_rule_fraud(user_id=1, start_date=start_date)
 
     def _raise(*args, **kwargs):
@@ -274,7 +274,7 @@ class TestGetTransactionHistory:
         return user, anchor_transaction
 
     def test_transactions_inside_window_are_returned_with_correct_count(self):
-        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         db = TestingSessionLocal()
         try:
             user, _ = self._seed_user_and_anchor(db, anchor=anchor)
@@ -300,7 +300,7 @@ class TestGetTransactionHistory:
         assert merchants == {"Anchor Merchant", "Corner Store", "Boundary Shop"}
 
     def test_transactions_outside_window_are_excluded(self):
-        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         db = TestingSessionLocal()
         try:
             user, _ = self._seed_user_and_anchor(db, anchor=anchor)
@@ -323,7 +323,7 @@ class TestGetTransactionHistory:
         assert [t["merchant"] for t in evidence["transactions"]] == ["Anchor Merchant"]
 
     def test_user_with_no_matching_transactions_returns_empty_history(self):
-        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         db = TestingSessionLocal()
         try:
             other_user = User(name="Other User")
@@ -353,7 +353,7 @@ class TestGetMerchantRiskScore:
         """A user with real history at *other* merchants, but none yet at
         this one -- proves the count is scoped by merchant, not just user.
         """
-        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         db = TestingSessionLocal()
         try:
             user = User(name="Test User")
@@ -376,7 +376,7 @@ class TestGetMerchantRiskScore:
         assert evidence["risk_tier"] is None
 
     def test_repeat_merchant_transaction_is_not_first_with_correct_prior_count(self):
-        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         db = TestingSessionLocal()
         try:
             user = User(name="Test User")
@@ -408,7 +408,7 @@ class TestGetMerchantRiskScore:
         _content, evidence = get_merchant_risk_score.func(
             user_id=999,
             merchant="Nonexistent Merchant",
-            anchor_timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            anchor_timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC),
         )
 
         assert evidence["is_first_transaction"] is True
@@ -448,7 +448,7 @@ class TestGetGeoDistance:
         actually flags this history+transaction pair as anomalous, so the
         two can't silently disagree about what "anomalous" means here.
         """
-        start_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        start_date = datetime(2026, 1, 1, tzinfo=UTC)
         [(seed_transaction, _)] = generate_triple_rule_fraud(user_id=1, start_date=start_date)
 
         db = TestingSessionLocal()
@@ -477,7 +477,7 @@ class TestGetGeoDistance:
         assert len(rule_hits) == 1  # sanity: the rule agrees this is anomalous
 
     def test_distance_km_is_consistent_with_distance_miles(self):
-        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         db = TestingSessionLocal()
         try:
             user, _ = self._seed_user_and_history(db, anchor=anchor, count=5)
@@ -496,7 +496,7 @@ class TestGetGeoDistance:
         itself requires before computing a centroid -- so the tool must not
         fabricate a distance or label from too small a sample.
         """
-        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         db = TestingSessionLocal()
         try:
             user, _ = self._seed_user_and_history(db, anchor=anchor, count=4)
@@ -516,7 +516,7 @@ class TestGetGeoDistance:
             user_id=999,
             latitude=14.5995,
             longitude=120.9842,
-            anchor_timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            anchor_timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC),
         )
 
         assert evidence["distance_km"] is None
@@ -524,7 +524,7 @@ class TestGetGeoDistance:
         assert evidence["typical_location_label"] is None
 
     def test_typical_location_label_is_the_most_frequent_prior_label(self):
-        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         db = TestingSessionLocal()
         try:
             user = User(name="Test User")
@@ -551,7 +551,7 @@ class TestGetGeoDistance:
         sorts before "Seattle, WA", so it wins the tie (see
         _most_common_location_label's min()-based tiebreak).
         """
-        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        anchor = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
         db = TestingSessionLocal()
         try:
             user = User(name="Test User")

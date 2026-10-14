@@ -7,7 +7,7 @@ cases don't get lost among that file's SCRUM-61 cases.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -82,7 +82,7 @@ def _seed_flagged_transaction() -> tuple[int, int, str]:
     history = [
         Transaction(
             user_id=user.id,
-            timestamp=datetime.now(timezone.utc) - timedelta(days=10 - i),
+            timestamp=datetime.now(UTC) - timedelta(days=10 - i),
             merchant="Test Merchant",
             category="groceries",
             amount=Decimal("10.00"),
@@ -94,7 +94,7 @@ def _seed_flagged_transaction() -> tuple[int, int, str]:
     ]
     outlier = Transaction(
         user_id=user.id,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         merchant="Test Merchant",
         category="groceries",
         amount=Decimal("500.00"),

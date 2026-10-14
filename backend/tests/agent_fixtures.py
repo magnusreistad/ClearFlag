@@ -17,7 +17,7 @@ to say anything in particular.
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import anthropic
@@ -37,7 +37,7 @@ from app.rules.engine import (
     rule_values_by_transaction,
 )
 
-BASE_TIME = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+BASE_TIME = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
 HOME = {"latitude": 47.6062, "longitude": -122.3321, "location_label": "Seattle, WA"}
 MANILA = {"latitude": 14.5995, "longitude": 120.9842, "location_label": "Manila, Philippines"}
 
