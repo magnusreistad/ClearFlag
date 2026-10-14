@@ -24,6 +24,7 @@ from app.rules.engine import (
     rule_values_by_transaction,
 )
 from app.schemas import (
+    CurrentDisposition,
     DispositionIn,
     DispositionOut,
     TransactionListResponse,
@@ -160,10 +161,42 @@ def _refresh_flags(db: Session, user_id: int) -> tuple[dict[int, str], dict[int,
     return {**interim_rationale_by_id, **agent_rationale_by_id}, rule_names_by_id
 
 
+def _current_dispositions(db: Session, transaction_ids: list[int]) -> dict[int, TransactionDisposition]:
+    """SCRUM-29. The latest disposition for each of `transaction_ids`, in
+    one query (DISTINCT ON, served by
+    ix_transaction_dispositions_transaction_latest) -- so a page costs one
+    extra statement whatever its size, not one per transaction.
+
+    Deliberately NOT wrapped in a SAVEPOINT/except like
+    _lookup_agent_rationales: an agent rationale has a safe fallback (the
+    interim one), but a missing disposition would read as "never
+    reviewed", which is a wrong answer, not a degraded one. A failure here
+    surfaces as a 500 instead.
+    """
+    if not transaction_ids:
+        return {}
+    rows = (
+        db.query(TransactionDisposition)
+        .filter(TransactionDisposition.transaction_id.in_(transaction_ids))
+        .order_by(
+            TransactionDisposition.transaction_id,
+            TransactionDisposition.created_at.desc(),
+            TransactionDisposition.id.desc(),
+        )
+        .distinct(TransactionDisposition.transaction_id)
+        .all()
+    )
+    return {row.transaction_id: row for row in rows}
+
+
 def _to_transaction_out(
-    t: Transaction, rationale_by_id: dict[int, str], rule_names_by_id: dict[int, list[str]]
+    t: Transaction,
+    rationale_by_id: dict[int, str],
+    rule_names_by_id: dict[int, list[str]],
+    disposition_by_id: dict[int, TransactionDisposition],
 ) -> TransactionOut:
     rationale = rationale_by_id.get(t.id)
+    disposition = disposition_by_id.get(t.id)
     return TransactionOut(
         id=t.id,
         user_id=t.user_id,
@@ -177,6 +210,13 @@ def _to_transaction_out(
         is_flagged=rationale is not None,
         rationale=rationale,
         rule_names=rule_names_by_id.get(t.id, []),
+        disposition=(
+            CurrentDisposition(
+                value=disposition.disposition, note=disposition.note, created_at=disposition.created_at
+            )
+            if disposition is not None
+            else None
+        ),
     )
 
 
@@ -197,8 +237,11 @@ def list_transactions(
         .limit(limit)
         .all()
     )
+    # After pagination (only this page's ids) and outside _refresh_flags'
+    # lock -- dispositions aren't touched by the flag refresh.
+    disposition_by_id = _current_dispositions(db, [t.id for t in transactions])
     return TransactionListResponse(
-        items=[_to_transaction_out(t, rationale_by_id, rule_names_by_id) for t in transactions],
+        items=[_to_transaction_out(t, rationale_by_id, rule_names_by_id, disposition_by_id) for t in transactions],
         total=total,
         limit=limit,
         offset=offset,

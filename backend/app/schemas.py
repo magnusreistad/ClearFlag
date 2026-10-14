@@ -11,6 +11,16 @@ from app.models import DISPOSITION_NOTE_MAX_LENGTH
 DispositionValue = Literal["confirmed_fraud", "false_positive", "ignored"]
 
 
+class CurrentDisposition(BaseModel):
+    """A transaction's latest disposition (SCRUM-29), as GET /transactions
+    shows it -- the rule_names snapshot stays on the disposition row for
+    the dashboard, not on the feed."""
+
+    value: DispositionValue
+    note: str | None
+    created_at: datetime
+
+
 class TransactionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -26,6 +36,10 @@ class TransactionOut(BaseModel):
     is_flagged: bool
     rationale: str | None
     rule_names: list[str]
+    # None when the transaction has never been dispositioned. Shown even if
+    # the transaction has since stopped being flagged -- the judgment still
+    # happened.
+    disposition: CurrentDisposition | None
 
 
 class TransactionListResponse(BaseModel):
