@@ -33,3 +33,13 @@ export interface TransactionListResponse {
   limit: number
   offset: number
 }
+
+// 201 body of POST /transactions/{id}/disposition (SCRUM-29).
+export interface DispositionOut {
+  id: number
+  transaction_id: number
+  disposition: DispositionValue
+  note: string | null
+  rule_names: string[]
+  created_at: string
+}
