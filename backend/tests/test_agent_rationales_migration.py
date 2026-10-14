@@ -21,6 +21,8 @@ from alembic import command
 from app.database import Base
 
 BACKEND_DIR = Path(__file__).parent.parent
+# b35e4801d1e1's (composed_text, validator_version) down_revision.
+FOLLOW_UP_DOWN_REVISION = "d6b18edd9aef"
 
 # One row per migrated table with a created_at column, in FK order, leaving
 # created_at out so the migration's server default has to supply it.
@@ -45,6 +47,7 @@ ROWS_WITHOUT_CREATED_AT = {
         "validation_passed": True,
         "violations": [],
     },
+    "transaction_dispositions": {"transaction_id": 1, "disposition": "false_positive", "rule_names": ["velocity"]},
 }
 
 
@@ -97,9 +100,10 @@ def test_server_default_created_at_works_on_every_migrated_table(migrated_scratc
 
 def test_alembic_downgrade_one_step_removes_just_the_follow_up_columns(migrated_scratch_database_url):
     """SCRUM-53 follow-up migration (composed_text, validator_version):
-    downgrading by one step must remove exactly those two columns and
-    nothing else -- the table and its original columns/index stay, matching
-    upgrade -1's own down_revision target."""
+    downgrading past it must remove exactly those two columns and nothing
+    else -- the table and its original columns/index stay. Targets the
+    follow-up's own down_revision explicitly rather than "-1", which stopped
+    meaning this migration once later ones (SCRUM-29) were added on top."""
     engine = create_engine(migrated_scratch_database_url)
     inspector = inspect(engine)
     assert {"composed_text", "validator_version"} <= {
@@ -109,7 +113,7 @@ def test_alembic_downgrade_one_step_removes_just_the_follow_up_columns(migrated_
 
     # migrated_scratch_database_url leaves DATABASE_URL pointed at the
     # scratch database, which is what alembic/env.py reads.
-    command.downgrade(Config(str(BACKEND_DIR / "alembic.ini")), "-1")
+    command.downgrade(Config(str(BACKEND_DIR / "alembic.ini")), FOLLOW_UP_DOWN_REVISION)
 
     engine = create_engine(migrated_scratch_database_url)
     inspector = inspect(engine)

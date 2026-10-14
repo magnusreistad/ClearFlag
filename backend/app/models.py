@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -11,7 +12,9 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    literal_column,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -176,4 +179,69 @@ class AgentRationale(Base):
     # later audit distinguish "this failed under an old, since-improved
     # validator" from "this failed under the current one".
     validator_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# The three analyst judgments a flagged transaction can receive (SCRUM-29).
+# Kept as a CHECK on a plain String column rather than a native Postgres
+# ENUM, so a later value change is an ordinary constraint swap in a
+# migration instead of an ALTER TYPE.
+DISPOSITION_VALUES = ("confirmed_fraud", "false_positive", "ignored")
+DISPOSITION_NOTE_MAX_LENGTH = 2000
+
+
+class TransactionDisposition(Base):
+    """SCRUM-29. One row per analyst judgment of a flagged transaction --
+    an event log, not a status column: the CURRENT disposition is the
+    latest row for a transaction (created_at DESC, id DESC as the tie-break
+    for two rows written in the same database transaction, which share a
+    now()).
+
+    Append-only by convention, like agent_rationales: application code
+    never updates or deletes a row here (scripts.seed_transactions is the
+    one exception -- it clears a user's whole dataset, dispositions
+    included, before regenerating it).
+
+    References transactions.id, never transaction_flags.id: _refresh_flags
+    deletes and reinserts every TransactionFlag row on every GET
+    /transactions (see app/routers/transactions.py), so a flag's id doesn't
+    survive a single request. Which rules had fired is instead snapshotted
+    into rule_names at POST time, from the persisted flags the analyst was
+    looking at -- so a per-rule false-positive rate reflects what was
+    actually judged, even after a rule's threshold changes or the
+    transaction stops being flagged.
+    """
+
+    __tablename__ = "transaction_dispositions"
+    __table_args__ = (
+        # Latest-disposition-per-transaction lookup (GET /transactions'
+        # DISTINCT ON query) -- same ordering as the query, so it's an
+        # index scan, not a sort.
+        Index(
+            "ix_transaction_dispositions_transaction_latest",
+            "transaction_id",
+            literal_column("created_at").desc(),
+            literal_column("id").desc(),
+        ),
+        CheckConstraint(
+            "disposition IN ('confirmed_fraud', 'false_positive', 'ignored')",
+            name="ck_transaction_dispositions_disposition_value",
+        ),
+        CheckConstraint(
+            f"char_length(note) <= {DISPOSITION_NOTE_MAX_LENGTH}",
+            name="ck_transaction_dispositions_note_length",
+        ),
+        CheckConstraint(
+            "cardinality(rule_names) >= 1",
+            name="ck_transaction_dispositions_rule_names_not_empty",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), nullable=False)
+    disposition: Mapped[str] = mapped_column(String, nullable=False)
+    # NULL for "no note" -- the endpoint stores a whitespace-only note as
+    # NULL too, so a reader never has to tell "" from "   " from absent.
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    rule_names: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
