@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { fetchTransactions } from '../../api/transactions'
-import type { Transaction } from '../../types/transaction'
+import type { CurrentDisposition, Transaction } from '../../types/transaction'
 import { dateKey, formatCategory, formatCurrency, formatGroupHeading, formatTime } from '../../lib/format'
+import { DispositionPanel } from '../DispositionPanel/DispositionPanel'
 import { FlagBadge } from '../FlagBadge/FlagBadge'
 import styles from './TransactionFeed.module.css'
 
@@ -64,6 +65,13 @@ export function TransactionFeed() {
   useEffect(() => {
     loadInitial()
   }, [loadInitial])
+
+  // Patches the one item from the POST's 201 rather than refetching: a GET
+  // re-runs the rules over the whole history (_refresh_flags) and would
+  // have to reload every page loaded so far.
+  const handleDispositionSaved = (transactionId: number, disposition: CurrentDisposition) => {
+    setItems((prev) => prev.map((item) => (item.id === transactionId ? { ...item, disposition } : item)))
+  }
 
   const handleLoadMore = async () => {
     setIsLoadingMore(true)
@@ -153,6 +161,12 @@ export function TransactionFeed() {
                   <span className={styles.amount}>{formatCurrency(transaction.amount)}</span>
                   <span className={styles.time}>{formatTime(transaction.timestamp)}</span>
                 </div>
+                <DispositionPanel
+                  transactionId={transaction.id}
+                  isFlagged={transaction.is_flagged}
+                  disposition={transaction.disposition}
+                  onSaved={(disposition) => handleDispositionSaved(transaction.id, disposition)}
+                />
               </li>
             ))}
           </ul>

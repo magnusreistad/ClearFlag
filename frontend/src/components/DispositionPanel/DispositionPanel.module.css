@@ -1,0 +1,208 @@
+/* Spans the full row under the avatar/details/amount line, indented to
+   line up with the merchant name (40px avatar + 12px row gap). */
+.review {
+  flex-basis: 100%;
+  min-width: 0;
+  padding-left: 52px;
+}
+
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.summaryStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.chip {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.chip[data-disposition='none'] {
+  border-color: #eff0f6;
+  color: #6e7191;
+}
+
+.chip[data-disposition='confirmed_fraud'] {
+  background: #fbeceb;
+  color: #a8402f;
+}
+
+.chip[data-disposition='false_positive'] {
+  background: #e9f6ef;
+  color: #2f7a52;
+}
+
+.chip[data-disposition='ignored'] {
+  background: #f2f2f7;
+  color: #6e7191;
+}
+
+.reviewedAt {
+  font-size: 12px;
+  color: #a0a3bd;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.toggle {
+  flex-shrink: 0;
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  color: #5551ff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  color: #4340d9;
+}
+
+.currentNote {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #6e7191;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.form {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #eff0f6;
+  border-radius: 12px;
+  background: #f7f7fc;
+}
+
+.form[hidden] {
+  display: none;
+}
+
+.fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #a0a3bd;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-bottom: 12px;
+}
+
+.option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: #1a1a2e;
+  cursor: pointer;
+}
+
+.option input {
+  margin: 0;
+  accent-color: #5551ff;
+}
+
+.noteLabel {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: #6e7191;
+}
+
+.note {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #eff0f6;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1a1a2e;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.note:focus {
+  outline: 2px solid #5551ff;
+  outline-offset: -1px;
+}
+
+.counter {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #a0a3bd;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.saveButton {
+  margin-top: 8px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 10px;
+  background: #5551ff;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.saveButton:hover:not(:disabled) {
+  background: #4340d9;
+}
+
+.saveButton:disabled {
+  background: #a0a3bd;
+  cursor: default;
+}
+
+.fieldset:disabled .option {
+  color: #a0a3bd;
+  cursor: default;
+}
+
+.error {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #a8402f;
+}
+
+.saved {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #2f7a52;
+}

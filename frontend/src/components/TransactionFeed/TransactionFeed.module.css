@@ -52,8 +52,9 @@
 
 .row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   padding: 14px 16px;
   border-bottom: 1px solid #f2f2f7;
 }

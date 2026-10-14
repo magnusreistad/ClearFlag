@@ -1,6 +1,12 @@
 const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
 const groupHeadingFormatter = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
 const timeFormatter = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' })
+const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
 
 // Every row in this dataset is spending (no income/refund type field yet),
 // so amounts are rendered as outflows: "-$42.30".
@@ -10,6 +16,12 @@ export function formatCurrency(amount: string): string {
 
 export function formatTime(isoTimestamp: string): string {
   return timeFormatter.format(new Date(isoTimestamp))
+}
+
+// "Aug 17, 2:30 PM" - for one-off timestamps outside a day group, where the
+// date isn't already given by the heading.
+export function formatDateTime(isoTimestamp: string): string {
+  return dateTimeFormatter.format(new Date(isoTimestamp))
 }
 
 function dateKeyFromDate(date: Date): string {
