@@ -80,6 +80,10 @@ class TransactionFlag(Base):
     these rows are wholesale recomputed (deleted and reinserted) every time
     the rules engine runs for a user, rather than updated in place. See
     app/routers/transactions.py.
+
+    Deliberately no timestamp column (SCRUM-80): rows are rewritten on every
+    refresh, so any timestamp here would only record the last refresh -- date
+    flags by transactions.timestamp instead.
     """
 
     __tablename__ = "transaction_flags"
@@ -99,9 +103,6 @@ class TransactionFlag(Base):
     )
     rule_name: Mapped[str] = mapped_column(String, nullable=False)
     rationale: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
 
     transaction: Mapped["Transaction"] = relationship(back_populates="flags")
 

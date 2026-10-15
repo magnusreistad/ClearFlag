@@ -38,11 +38,6 @@ ROWS_WITHOUT_CREATED_AT = {
         "longitude": -122.3321,
         "location_label": "Seattle, WA",
     },
-    "transaction_flags": {
-        "transaction_id": 1,
-        "rule_name": "velocity",
-        "rationale": "Flagged: velocity reason.",
-    },
     "agent_rationales": {
         "transaction_id": 1,
         "fact_fingerprint": "fingerprint",
