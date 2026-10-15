@@ -34,7 +34,9 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, default="Demo User")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
 
@@ -62,7 +64,9 @@ class Transaction(Base):
     latitude: Mapped[float] = mapped_column(nullable=False)
     longitude: Mapped[float] = mapped_column(nullable=False)
     location_label: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     user: Mapped["User"] = relationship(back_populates="transactions")
     flags: Mapped[list["TransactionFlag"]] = relationship(
@@ -84,14 +88,20 @@ class TransactionFlag(Base):
         # Safety net against the delete-then-reinsert refresh (see
         # app/routers/transactions.py) double-counting a rule hit if it's
         # ever interrupted partway or a future code path skips the delete.
-        UniqueConstraint("transaction_id", "rule_name", name="uq_transaction_flags_transaction_rule"),
+        UniqueConstraint(
+            "transaction_id", "rule_name", name="uq_transaction_flags_transaction_rule"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), nullable=False)
+    transaction_id: Mapped[int] = mapped_column(
+        ForeignKey("transactions.id"), nullable=False
+    )
     rule_name: Mapped[str] = mapped_column(String, nullable=False)
     rationale: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     transaction: Mapped["Transaction"] = relationship(back_populates="flags")
 
@@ -144,7 +154,9 @@ class AgentRationale(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), nullable=False)
+    transaction_id: Mapped[int] = mapped_column(
+        ForeignKey("transactions.id"), nullable=False
+    )
     fact_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
     prompt_version: Mapped[str] = mapped_column(String, nullable=False)
     model_id: Mapped[str] = mapped_column(String, nullable=False)
@@ -179,7 +191,9 @@ class AgentRationale(Base):
     # later audit distinguish "this failed under an old, since-improved
     # validator" from "this failed under the current one".
     validator_version: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 # The three analyst judgments a flagged transaction can receive (SCRUM-29).
@@ -238,10 +252,14 @@ class TransactionDisposition(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), nullable=False)
+    transaction_id: Mapped[int] = mapped_column(
+        ForeignKey("transactions.id"), nullable=False
+    )
     disposition: Mapped[str] = mapped_column(String, nullable=False)
     # NULL for "no note" -- the endpoint stores a whitespace-only note as
     # NULL too, so a reader never has to tell "" from "   " from absent.
     note: Mapped[str | None] = mapped_column(String, nullable=True)
     rule_names: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

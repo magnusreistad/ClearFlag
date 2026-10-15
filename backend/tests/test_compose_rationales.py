@@ -59,16 +59,24 @@ def _seed_flagged_user() -> tuple[int, int]:
 
 
 class TestComposeAndSkip:
-    def test_composes_a_pending_transaction_and_records_a_pass(self, monkeypatch, caplog, scripted_llm):
+    def test_composes_a_pending_transaction_and_records_a_pass(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         scripted_llm(*_messages(GROUNDED_RATIONALE))
         user_id, outlier_id = _seed_flagged_user()
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
 
         compose_rationales.main()
 
         db = TestingSessionLocal()
-        rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == outlier_id).all()
+        rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == outlier_id)
+            .all()
+        )
         db.close()
 
         assert len(rows) == 1
@@ -80,16 +88,23 @@ class TestComposeAndSkip:
         assert rows[0].composed_text == GROUNDED_RATIONALE
         assert rows[0].validator_version == VALIDATOR_VERSION
 
-        assert "run complete: passed=1 validation_failed=0 composition_error=0 skipped_capped=0 skipped_already_passing=0" in caplog.text
+        assert (
+            "run complete: passed=1 validation_failed=0 composition_error=0 skipped_capped=0 skipped_already_passing=0"
+            in caplog.text
+        )
         assert f"transaction={outlier_id}" in caplog.text
         assert "outcome=passed" in caplog.text
         assert f"attempt=1/{MAX_VALIDATION_ATTEMPTS}" in caplog.text
 
-    def test_second_run_skips_the_already_passing_transaction(self, monkeypatch, caplog, scripted_llm):
+    def test_second_run_skips_the_already_passing_transaction(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         scripted_llm(*_messages(GROUNDED_RATIONALE))
         user_id, outlier_id = _seed_flagged_user()
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
         compose_rationales.main()
         caplog.clear()  # discard first run's output
 
@@ -98,24 +113,39 @@ class TestComposeAndSkip:
         compose_rationales.main()
 
         db = TestingSessionLocal()
-        rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == outlier_id).all()
+        rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == outlier_id)
+            .all()
+        )
         db.close()
         assert len(rows) == 1  # not duplicated
 
-        assert "run complete: passed=0 validation_failed=0 composition_error=0 skipped_capped=0 skipped_already_passing=1" in caplog.text
+        assert (
+            "run complete: passed=0 validation_failed=0 composition_error=0 skipped_capped=0 skipped_already_passing=1"
+            in caplog.text
+        )
         assert f"transaction={outlier_id}" in caplog.text
         assert "outcome=skipped_already_passing" in caplog.text
 
-    def test_records_a_failed_composition_without_crashing(self, monkeypatch, caplog, scripted_llm):
+    def test_records_a_failed_composition_without_crashing(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         user_id, outlier_id = _seed_flagged_user()
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
 
         compose_rationales.main()
 
         db = TestingSessionLocal()
-        rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == outlier_id).all()
+        rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == outlier_id)
+            .all()
+        )
         db.close()
 
         assert len(rows) == 1
@@ -128,7 +158,10 @@ class TestComposeAndSkip:
         assert rows[0].composed_text == UNGROUNDED_RATIONALE
         assert rows[0].validator_version == VALIDATOR_VERSION
 
-        assert "run complete: passed=0 validation_failed=1 composition_error=0 skipped_capped=0 skipped_already_passing=0" in caplog.text
+        assert (
+            "run complete: passed=0 validation_failed=1 composition_error=0 skipped_capped=0 skipped_already_passing=0"
+            in caplog.text
+        )
         assert "outcome=validation_failed" in caplog.text
         assert f"attempt=1/{MAX_VALIDATION_ATTEMPTS}" in caplog.text
         # Violation types are logged (SCRUM-56); the composed text/prompt/violation
@@ -138,10 +171,14 @@ class TestComposeAndSkip:
 
 
 class TestDryRun:
-    def test_dry_run_makes_no_model_calls_and_no_writes(self, monkeypatch, capsys, scripted_llm):
+    def test_dry_run_makes_no_model_calls_and_no_writes(
+        self, monkeypatch, capsys, scripted_llm
+    ):
         llm = scripted_llm()  # nothing scripted: any model call fails the test
         user_id, outlier_id = _seed_flagged_user()
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id), "--dry-run"])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id), "--dry-run"]
+        )
 
         compose_rationales.main()
 
@@ -157,7 +194,9 @@ class TestDryRun:
 
 
 class TestLimit:
-    def test_limit_bounds_how_many_are_composed_in_one_run(self, monkeypatch, caplog, scripted_llm):
+    def test_limit_bounds_how_many_are_composed_in_one_run(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         scripted_llm(*_messages(GROUNDED_RATIONALE, GROUNDED_RATIONALE))
 
@@ -173,7 +212,11 @@ class TestLimit:
         user_id = user.id
         db.close()
 
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id), "--limit", "1"])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["compose_rationales", "--user-id", str(user_id), "--limit", "1"],
+        )
         compose_rationales.main()
 
         db = TestingSessionLocal()
@@ -181,7 +224,10 @@ class TestLimit:
         db.close()
         assert composed_count == 1
 
-        assert "run complete: passed=1 validation_failed=0 composition_error=0 skipped_capped=0 skipped_already_passing=0" in caplog.text
+        assert (
+            "run complete: passed=1 validation_failed=0 composition_error=0 skipped_capped=0 skipped_already_passing=0"
+            in caplog.text
+        )
 
 
 class TestRetryCap:
@@ -192,10 +238,14 @@ class TestRetryCap:
     and rows from a different budget key (a validator_version bump, or a
     row with validator_version IS NULL), don't count."""
 
-    def test_cap_skips_the_third_attempt_without_calling_the_model(self, monkeypatch, caplog, scripted_llm):
+    def test_cap_skips_the_third_attempt_without_calling_the_model(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         user_id, outlier_id = _seed_flagged_user()
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
 
         scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         compose_rationales.main()
@@ -209,21 +259,34 @@ class TestRetryCap:
         assert counting_model.invocations == 0  # the third run never even tries
 
         db = TestingSessionLocal()
-        rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == outlier_id).all()
+        rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == outlier_id)
+            .all()
+        )
         db.close()
-        assert len(rows) == 2  # capped after the second validation-failed attempt, not a third
+        assert (
+            len(rows) == 2
+        )  # capped after the second validation-failed attempt, not a third
 
         assert "outcome=skipped_capped" in caplog.text
-        assert f"attempt={MAX_VALIDATION_ATTEMPTS}/{MAX_VALIDATION_ATTEMPTS}" in caplog.text
+        assert (
+            f"attempt={MAX_VALIDATION_ATTEMPTS}/{MAX_VALIDATION_ATTEMPTS}"
+            in caplog.text
+        )
         assert (
             "run complete: passed=0 validation_failed=0 composition_error=0 "
             "skipped_capped=1 skipped_already_passing=0"
         ) in caplog.text
 
-    def test_composition_error_attempts_do_not_consume_the_budget(self, monkeypatch, caplog, scripted_llm):
+    def test_composition_error_attempts_do_not_consume_the_budget(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         user_id, outlier_id = _seed_flagged_user()
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
 
         # Three runs, each a model failure -- if composition_error consumed
         # the same budget as a validation failure, the third would be capped
@@ -238,17 +301,25 @@ class TestRetryCap:
             assert exc_info.value.code == 1
 
         db = TestingSessionLocal()
-        rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == outlier_id).all()
+        rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == outlier_id)
+            .all()
+        )
         db.close()
         assert len(rows) == 3
         assert all(row.composition_error is not None for row in rows)
 
         assert "outcome=skipped_capped" not in caplog.text
 
-    def test_validator_version_bump_resets_the_budget(self, monkeypatch, caplog, scripted_llm):
+    def test_validator_version_bump_resets_the_budget(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
         user_id, outlier_id = _seed_flagged_user()
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
 
         scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         compose_rationales.main()
@@ -281,7 +352,9 @@ class TestRetryCap:
         assert rows[-1].validation_passed is True
         assert "outcome=passed" in caplog.text
 
-    def test_null_validator_version_row_does_not_consume_budget(self, monkeypatch, caplog, scripted_llm):
+    def test_null_validator_version_row_does_not_consume_budget(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         """A row written before the validator_version column existed
         (validator_version IS NULL) never matches VALIDATOR_VERSION by
         exact-equality, so it doesn't count toward the cap -- confirmed here
@@ -292,14 +365,18 @@ class TestRetryCap:
         user_id, outlier_id = _seed_flagged_user()
 
         db = TestingSessionLocal()
-        transactions = db.query(Transaction).filter(Transaction.user_id == user_id).all()
+        transactions = (
+            db.query(Transaction).filter(Transaction.user_id == user_id).all()
+        )
         hits = evaluate_all_rules(transactions)
         rule_names_by_id = rule_names_by_transaction(hits)
         rule_values_by_id = rule_values_by_transaction(hits)
         outlier = next(t for t in transactions if t.id == outlier_id)
         fingerprint = compute_fact_fingerprint(
             build_payload(
-                transaction_data_from_orm(outlier), rule_names_by_id[outlier_id], rule_values_by_id.get(outlier_id, {})
+                transaction_data_from_orm(outlier),
+                rule_names_by_id[outlier_id],
+                rule_values_by_id.get(outlier_id, {}),
             )
         )
         db.add(
@@ -319,19 +396,27 @@ class TestRetryCap:
         db.commit()
         db.close()
 
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
         scripted_llm(*_messages(GROUNDED_RATIONALE))
 
         compose_rationales.main()
 
         db = TestingSessionLocal()
-        rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == outlier_id).all()
+        rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == outlier_id)
+            .all()
+        )
         db.close()
         assert len(rows) == 2  # the legacy row, plus this run's new attempt
         assert "outcome=skipped_capped" not in caplog.text
         assert "outcome=passed" in caplog.text
 
-    def test_capped_transactions_dont_count_against_limit(self, monkeypatch, caplog, scripted_llm):
+    def test_capped_transactions_dont_count_against_limit(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         """Capping filters happen in _collect_pending, BEFORE --limit slices
         the pending list -- a capped transaction must not use up a run slot
         that a transaction still worth attempting could have had."""
@@ -346,7 +431,9 @@ class TestRetryCap:
         user_id = user.id
         db.close()
 
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
         scripted_llm(*_messages(UNGROUNDED_RATIONALE))
         compose_rationales.main()
         scripted_llm(*_messages(UNGROUNDED_RATIONALE))
@@ -359,18 +446,32 @@ class TestRetryCap:
         db.commit()
         db.close()
 
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id), "--limit", "1"])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["compose_rationales", "--user-id", str(user_id), "--limit", "1"],
+        )
         scripted_llm(*_messages(GROUNDED_RATIONALE))
         compose_rationales.main()
 
         db = TestingSessionLocal()
-        fresh_rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == fresh_id).all()
-        capped_rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == capped_id).all()
+        fresh_rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == fresh_id)
+            .all()
+        )
+        capped_rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == capped_id)
+            .all()
+        )
         db.close()
 
         assert len(fresh_rows) == 1
         assert fresh_rows[0].validation_passed is True
-        assert len(capped_rows) == 2  # unchanged -- the capped transaction was never attempted a third time
+        assert (
+            len(capped_rows) == 2
+        )  # unchanged -- the capped transaction was never attempted a third time
 
         assert f"transaction={fresh_id}" in caplog.text
         assert "outcome=passed" in caplog.text
@@ -379,7 +480,9 @@ class TestRetryCap:
 
 
 class TestOneFailureDoesntStopTheRest:
-    def test_one_transactions_model_error_doesnt_stop_the_others_in_the_run(self, monkeypatch, caplog, scripted_llm):
+    def test_one_transactions_model_error_doesnt_stop_the_others_in_the_run(
+        self, monkeypatch, caplog, scripted_llm
+    ):
         caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
 
         db = TestingSessionLocal()
@@ -396,49 +499,76 @@ class TestOneFailureDoesntStopTheRest:
         # groceries outlier (added first, lower id) is composed before the
         # dining one -- scripting the model to fail on the first call and
         # succeed on the second exercises exactly that ordering.
-        scripted_llm(TimeoutError("simulated model timeout"), *_messages(GROUNDED_RATIONALE))
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        scripted_llm(
+            TimeoutError("simulated model timeout"), *_messages(GROUNDED_RATIONALE)
+        )
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
 
         with pytest.raises(SystemExit) as exc_info:
             compose_rationales.main()
         assert exc_info.value.code == 1
 
         db = TestingSessionLocal()
-        failing_rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == failing_id).all()
-        passing_rows = db.query(AgentRationale).filter(AgentRationale.transaction_id == passing_id).all()
+        failing_rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == failing_id)
+            .all()
+        )
+        passing_rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == passing_id)
+            .all()
+        )
         db.close()
 
         assert len(failing_rows) == 1
         assert failing_rows[0].composition_error is not None
-        assert len(passing_rows) == 1  # still attempted, and passed, despite the other transaction's failure
+        assert (
+            len(passing_rows) == 1
+        )  # still attempted, and passed, despite the other transaction's failure
         assert passing_rows[0].validation_passed is True
 
-        assert "run complete: passed=1 validation_failed=0 composition_error=1 skipped_capped=0 skipped_already_passing=0" in caplog.text
+        assert (
+            "run complete: passed=1 validation_failed=0 composition_error=1 skipped_capped=0 skipped_already_passing=0"
+            in caplog.text
+        )
 
 
 class TestExitCode:
     def test_exits_zero_when_every_attempt_passes(self, monkeypatch, scripted_llm):
         user_id, _outlier_id = _seed_flagged_user()
         scripted_llm(*_messages(GROUNDED_RATIONALE))
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
 
         compose_rationales.main()  # would raise SystemExit if it tried to exit non-zero
 
-    def test_exits_non_zero_when_a_composition_error_occurs(self, monkeypatch, scripted_llm):
+    def test_exits_non_zero_when_a_composition_error_occurs(
+        self, monkeypatch, scripted_llm
+    ):
         user_id, _outlier_id = _seed_flagged_user()
 
         scripted_llm(TimeoutError("simulated model timeout"))
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id)])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
 
         with pytest.raises(SystemExit) as exc_info:
             compose_rationales.main()
         assert exc_info.value.code == 1
 
-    def test_dry_run_always_exits_zero_even_with_pending_work(self, monkeypatch, scripted_llm):
+    def test_dry_run_always_exits_zero_even_with_pending_work(
+        self, monkeypatch, scripted_llm
+    ):
         user_id, _outlier_id = _seed_flagged_user()
 
         llm = scripted_llm()  # nothing scripted: any model call fails the test
-        monkeypatch.setattr(sys, "argv", ["compose_rationales", "--user-id", str(user_id), "--dry-run"])
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id), "--dry-run"]
+        )
 
         compose_rationales.main()  # would raise SystemExit if it tried to exit non-zero
 

@@ -47,43 +47,72 @@ FAR_LOCATIONS = [
 # distribution (mean, stdev, floor) used to draw normal transaction amounts.
 CATEGORIES = {
     "groceries": {
-        "merchants": [("Whole Foods Market", 4), ("Trader Joe's", 3), ("Safeway", 2), ("QFC", 1)],
-        "mean": 62, "stdev": 22, "floor": 8,
+        "merchants": [
+            ("Whole Foods Market", 4),
+            ("Trader Joe's", 3),
+            ("Safeway", 2),
+            ("QFC", 1),
+        ],
+        "mean": 62,
+        "stdev": 22,
+        "floor": 8,
     },
     "dining": {
-        "merchants": [("Starbucks", 5), ("Chipotle Mexican Grill", 3), ("Panera Bread", 2), ("Din Tai Fung", 1)],
-        "mean": 21, "stdev": 12, "floor": 4,
+        "merchants": [
+            ("Starbucks", 5),
+            ("Chipotle Mexican Grill", 3),
+            ("Panera Bread", 2),
+            ("Din Tai Fung", 1),
+        ],
+        "mean": 21,
+        "stdev": 12,
+        "floor": 4,
     },
     "gas_transport": {
         "merchants": [("Shell", 3), ("Chevron", 3), ("Uber", 2), ("Lyft", 1)],
-        "mean": 42, "stdev": 14, "floor": 12,
+        "mean": 42,
+        "stdev": 14,
+        "floor": 12,
     },
     "shopping": {
         "merchants": [("Amazon", 5), ("Target", 3), ("Best Buy", 1), ("REI", 1)],
-        "mean": 58, "stdev": 32, "floor": 10,
+        "mean": 58,
+        "stdev": 32,
+        "floor": 10,
     },
     "entertainment": {
         "merchants": [("AMC Theatres", 3), ("Steam", 2), ("Ticketmaster", 1)],
-        "mean": 34, "stdev": 18, "floor": 8,
+        "mean": 34,
+        "stdev": 18,
+        "floor": 8,
     },
     "health": {
         "merchants": [("CVS Pharmacy", 3), ("Walgreens", 2), ("Bartell Drugs", 1)],
-        "mean": 28, "stdev": 16, "floor": 6,
+        "mean": 28,
+        "stdev": 16,
+        "floor": 6,
     },
 }
 CATEGORY_WEIGHTS = {
-    "groceries": 22, "dining": 26, "gas_transport": 16,
-    "shopping": 14, "entertainment": 12, "health": 10,
+    "groceries": 22,
+    "dining": 26,
+    "gas_transport": 16,
+    "shopping": 14,
+    "entertainment": 12,
+    "health": 10,
 }
 
 # Recurring monthly charges: a realistic touch that's also useful baseline
 # noise around the planted "new merchant" scenarios below.
 SUBSCRIPTIONS = [
-    ("Netflix", Decimal("15.99")), ("Spotify", Decimal("10.99")),
-    ("Disney+", Decimal("7.99")), ("Amazon Prime", Decimal("14.99")),
+    ("Netflix", Decimal("15.99")),
+    ("Spotify", Decimal("10.99")),
+    ("Disney+", Decimal("7.99")),
+    ("Amazon Prime", Decimal("14.99")),
 ]
 UTILITIES = [
-    ("Seattle City Light", 70, 140), ("Comcast Xfinity", 60, 110),
+    ("Seattle City Light", 70, 140),
+    ("Comcast Xfinity", 60, 110),
     ("Puget Sound Energy", 50, 130),
 ]
 
@@ -103,7 +132,11 @@ def confirm_dev_database(skip_prompt: bool) -> None:
     print(f"Target database host: {host}")
     if skip_prompt:
         return
-    reply = input("Confirm this is the `dev` Neon branch, not `production` [y/N]: ").strip().lower()
+    reply = (
+        input("Confirm this is the `dev` Neon branch, not `production` [y/N]: ")
+        .strip()
+        .lower()
+    )
     if reply != "y":
         raise SystemExit("Aborted: confirmation not given.")
 
@@ -128,7 +161,9 @@ def jittered_home_location() -> tuple[float, float, str]:
 
 def random_timestamp(day: datetime) -> datetime:
     hour = random.choices(range(24), weights=HOUR_WEIGHTS)[0]
-    return day.replace(hour=hour, minute=random.randint(0, 59), second=random.randint(0, 59))
+    return day.replace(
+        hour=hour, minute=random.randint(0, 59), second=random.randint(0, 59)
+    )
 
 
 def draw_amount(mean: float, stdev: float, floor: float) -> Decimal:
@@ -136,12 +171,24 @@ def draw_amount(mean: float, stdev: float, floor: float) -> Decimal:
     return Decimal(str(round(value, 2)))
 
 
-def make_transaction(user_id: int, timestamp: datetime, merchant: str, category: str, amount: Decimal,
-                      location: tuple[float, float, str]) -> Transaction:
+def make_transaction(
+    user_id: int,
+    timestamp: datetime,
+    merchant: str,
+    category: str,
+    amount: Decimal,
+    location: tuple[float, float, str],
+) -> Transaction:
     lat, lon, label = location
     return Transaction(
-        user_id=user_id, timestamp=timestamp, merchant=merchant, category=category,
-        amount=amount, latitude=lat, longitude=lon, location_label=label,
+        user_id=user_id,
+        timestamp=timestamp,
+        merchant=merchant,
+        category=category,
+        amount=amount,
+        latitude=lat,
+        longitude=lon,
+        location_label=label,
     )
 
 
@@ -165,25 +212,49 @@ def generate_baseline(user_id: int, start_date: datetime) -> list[Transaction]:
             category = random.choices(categories, weights=weights)[0]
             spec = CATEGORIES[category]
             merchant = random.choices(
-                [m for m, _ in spec["merchants"]], weights=[w for _, w in spec["merchants"]]
+                [m for m, _ in spec["merchants"]],
+                weights=[w for _, w in spec["merchants"]],
             )[0]
             amount = draw_amount(spec["mean"], spec["stdev"], spec["floor"])
-            transactions.append(make_transaction(
-                user_id, random_timestamp(day), merchant, category, amount, jittered_home_location(),
-            ))
+            transactions.append(
+                make_transaction(
+                    user_id,
+                    random_timestamp(day),
+                    merchant,
+                    category,
+                    amount,
+                    jittered_home_location(),
+                )
+            )
 
     # Recurring monthly subscriptions and utilities, once per ~30-day window.
     for month in range(DAYS_OF_HISTORY // 30 + 1):
-        day = start_date + timedelta(days=min(month * 30 + random.randint(0, 3), DAYS_OF_HISTORY - 1))
+        day = start_date + timedelta(
+            days=min(month * 30 + random.randint(0, 3), DAYS_OF_HISTORY - 1)
+        )
         for merchant, amount in SUBSCRIPTIONS:
-            transactions.append(make_transaction(
-                user_id, random_timestamp(day), merchant, "subscriptions", amount, jittered_home_location(),
-            ))
+            transactions.append(
+                make_transaction(
+                    user_id,
+                    random_timestamp(day),
+                    merchant,
+                    "subscriptions",
+                    amount,
+                    jittered_home_location(),
+                )
+            )
         for merchant, low, high in UTILITIES:
             amount = Decimal(str(round(random.uniform(low, high), 2)))
-            transactions.append(make_transaction(
-                user_id, random_timestamp(day), merchant, "utilities", amount, jittered_home_location(),
-            ))
+            transactions.append(
+                make_transaction(
+                    user_id,
+                    random_timestamp(day),
+                    merchant,
+                    "utilities",
+                    amount,
+                    jittered_home_location(),
+                )
+            )
 
     return transactions
 
@@ -196,7 +267,10 @@ def generate_baseline(user_id: int, start_date: datetime) -> list[Transaction]:
 # aren't finalized yet. Each generator returns (Transaction, reason) pairs
 # so main() can print a verification summary after inserting.
 
-def generate_velocity_fraud(user_id: int, start_date: datetime) -> list[tuple[Transaction, str]]:
+
+def generate_velocity_fraud(
+    user_id: int, start_date: datetime
+) -> list[tuple[Transaction, str]]:
     """Rule 1 — velocity: clusters of several transactions in a short window.
 
     Simulates card-testing: a burst of small purchases at different
@@ -213,12 +287,18 @@ def generate_velocity_fraud(user_id: int, start_date: datetime) -> list[tuple[Tr
             category = random.choice(["shopping", "gas_transport", "entertainment"])
             merchant = f"QuickPay Test Merchant {cluster_index + 1}-{i + 1}"
             amount = Decimal(str(round(random.uniform(4, 30), 2)))
-            tx = make_transaction(user_id, ts, merchant, category, amount, jittered_home_location())
-            results.append((tx, f"velocity cluster #{cluster_index + 1}: 6 charges within ~30 min"))
+            tx = make_transaction(
+                user_id, ts, merchant, category, amount, jittered_home_location()
+            )
+            results.append(
+                (tx, f"velocity cluster #{cluster_index + 1}: 6 charges within ~30 min")
+            )
     return results
 
 
-def generate_geo_anomaly_fraud(user_id: int, start_date: datetime) -> list[tuple[Transaction, str]]:
+def generate_geo_anomaly_fraud(
+    user_id: int, start_date: datetime
+) -> list[tuple[Transaction, str]]:
     """Rule 2 — geographic anomaly: a transaction far from the home cluster.
 
     Amount looks ordinary for its category; only the location is wrong,
@@ -236,30 +316,50 @@ def generate_geo_anomaly_fraud(user_id: int, start_date: datetime) -> list[tuple
             [m for m, _ in spec["merchants"]], weights=[w for _, w in spec["merchants"]]
         )[0]
         location = (far["lat"], far["lon"], far["label"])
-        tx = make_transaction(user_id, random_timestamp(day), merchant, category, amount, location)
-        results.append((tx, f"geographic anomaly: {far['label']}, far outside the home cluster"))
+        tx = make_transaction(
+            user_id, random_timestamp(day), merchant, category, amount, location
+        )
+        results.append(
+            (tx, f"geographic anomaly: {far['label']}, far outside the home cluster")
+        )
     return results
 
 
-def generate_amount_deviation_fraud(user_id: int, start_date: datetime) -> list[tuple[Transaction, str]]:
+def generate_amount_deviation_fraud(
+    user_id: int, start_date: datetime
+) -> list[tuple[Transaction, str]]:
     """Rule 3 — amount deviation: far outside the user's typical spend for
     that merchant category, at an otherwise-regular merchant/location.
     """
     results = []
     plants = [
-        (18, "groceries", "Whole Foods Market", Decimal("540.00")),   # normal mean ~62
-        (49, "dining", "Chipotle Mexican Grill", Decimal("310.00")),   # normal mean ~21
-        (70, "entertainment", "AMC Theatres", Decimal("420.00")),      # normal mean ~34
-        (85, "health", "CVS Pharmacy", Decimal("380.00")),             # normal mean ~28
+        (18, "groceries", "Whole Foods Market", Decimal("540.00")),  # normal mean ~62
+        (49, "dining", "Chipotle Mexican Grill", Decimal("310.00")),  # normal mean ~21
+        (70, "entertainment", "AMC Theatres", Decimal("420.00")),  # normal mean ~34
+        (85, "health", "CVS Pharmacy", Decimal("380.00")),  # normal mean ~28
     ]
     for day_offset, category, merchant, amount in plants:
         day = start_date + timedelta(days=day_offset)
-        tx = make_transaction(user_id, random_timestamp(day), merchant, category, amount, jittered_home_location())
-        results.append((tx, f"amount deviation: {amount} vs category mean ~{CATEGORIES[category]['mean']}"))
+        tx = make_transaction(
+            user_id,
+            random_timestamp(day),
+            merchant,
+            category,
+            amount,
+            jittered_home_location(),
+        )
+        results.append(
+            (
+                tx,
+                f"amount deviation: {amount} vs category mean ~{CATEGORIES[category]['mean']}",
+            )
+        )
     return results
 
 
-def generate_new_merchant_fraud(user_id: int, start_date: datetime) -> list[tuple[Transaction, str]]:
+def generate_new_merchant_fraud(
+    user_id: int, start_date: datetime
+) -> list[tuple[Transaction, str]]:
     """Rule 4 — new-merchant risk: first-time merchant at an above-typical
     first-purchase amount. These merchant names never appear in baseline
     data, so they're guaranteed first-time-for-this-user by construction.
@@ -272,12 +372,26 @@ def generate_new_merchant_fraud(user_id: int, start_date: datetime) -> list[tupl
     ]
     for day_offset, category, merchant, amount in plants:
         day = start_date + timedelta(days=day_offset)
-        tx = make_transaction(user_id, random_timestamp(day), merchant, category, amount, jittered_home_location())
-        results.append((tx, f"new merchant: first-ever charge from {merchant!r} at above-typical amount"))
+        tx = make_transaction(
+            user_id,
+            random_timestamp(day),
+            merchant,
+            category,
+            amount,
+            jittered_home_location(),
+        )
+        results.append(
+            (
+                tx,
+                f"new merchant: first-ever charge from {merchant!r} at above-typical amount",
+            )
+        )
     return results
 
 
-def generate_multi_rule_fraud(user_id: int, start_date: datetime) -> list[tuple[Transaction, str]]:
+def generate_multi_rule_fraud(
+    user_id: int, start_date: datetime
+) -> list[tuple[Transaction, str]]:
     """A single transaction that trips two rules at once: new merchant *and*
     amount deviation, as required for a realistic multi-signal case.
     """
@@ -285,11 +399,22 @@ def generate_multi_rule_fraud(user_id: int, start_date: datetime) -> list[tuple[
     category = "shopping"
     merchant = "Aurora Fine Jewelers"
     amount = Decimal("2150.00")  # both first-ever merchant and ~37x category mean
-    tx = make_transaction(user_id, random_timestamp(day), merchant, category, amount, jittered_home_location())
-    return [(tx, "multi-rule: new merchant AND amount deviation in the same transaction")]
+    tx = make_transaction(
+        user_id,
+        random_timestamp(day),
+        merchant,
+        category,
+        amount,
+        jittered_home_location(),
+    )
+    return [
+        (tx, "multi-rule: new merchant AND amount deviation in the same transaction")
+    ]
 
 
-def generate_triple_rule_fraud(user_id: int, start_date: datetime) -> list[tuple[Transaction, str]]:
+def generate_triple_rule_fraud(
+    user_id: int, start_date: datetime
+) -> list[tuple[Transaction, str]]:
     """A single transaction that trips three rules at once (SCRUM-65): new
     merchant, amount deviation, AND geographic anomaly -- the classic
     "compromised card used internationally" pattern, which happens to be a
@@ -309,13 +434,22 @@ def generate_triple_rule_fraud(user_id: int, start_date: datetime) -> list[tuple
     far = FAR_LOCATIONS[3]
     assert far["label"] == "Manila, Philippines"
     location = (far["lat"], far["lon"], far["label"])
-    tx = make_transaction(user_id, random_timestamp(day), merchant, category, amount, location)
-    return [(tx, "triple-rule: new merchant AND amount deviation AND geographic anomaly in the same transaction")]
+    tx = make_transaction(
+        user_id, random_timestamp(day), merchant, category, amount, location
+    )
+    return [
+        (
+            tx,
+            "triple-rule: new merchant AND amount deviation AND geographic anomaly in the same transaction",
+        )
+    ]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--yes", action="store_true", help="skip the dev-database confirmation prompt")
+    parser.add_argument(
+        "--yes", action="store_true", help="skip the dev-database confirmation prompt"
+    )
     args = parser.parse_args()
 
     confirm_dev_database(skip_prompt=args.yes)
@@ -343,7 +477,11 @@ def main() -> None:
                 db.query(Transaction.id).filter(Transaction.user_id == user.id)
             )
         ).delete(synchronize_session=False)
-        deleted = db.query(Transaction).filter(Transaction.user_id == user.id).delete(synchronize_session=False)
+        deleted = (
+            db.query(Transaction)
+            .filter(Transaction.user_id == user.id)
+            .delete(synchronize_session=False)
+        )
 
         start_date = datetime.now(UTC).replace(
             hour=0, minute=0, second=0, microsecond=0
@@ -382,9 +520,13 @@ def main() -> None:
 
         db.commit()
 
-        print(f"Cleared {deleted} existing transaction(s) for user {user_id} ({user_name!r}).")
-        print(f"Inserted {total} transactions ({len(baseline)} baseline + "
-              f"{total - len(baseline)} planted fraud) spanning {DAYS_OF_HISTORY} days.\n")
+        print(
+            f"Cleared {deleted} existing transaction(s) for user {user_id} ({user_name!r})."
+        )
+        print(
+            f"Inserted {total} transactions ({len(baseline)} baseline + "
+            f"{total - len(baseline)} planted fraud) spanning {DAYS_OF_HISTORY} days.\n"
+        )
         print("Planted fraud scenarios:")
         print("\n".join(summary_lines))
     except Exception:

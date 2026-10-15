@@ -122,7 +122,9 @@ def scripted_llm(monkeypatch):
         return scripted
 
     yield install
-    assert sum(s.unscripted_calls for s in installed) == 0, "a model call was made that the test didn't script"
+    assert sum(s.unscripted_calls for s in installed) == 0, (
+        "a model call was made that the test didn't script"
+    )
 
 
 @pytest.fixture
@@ -130,7 +132,11 @@ def scratch_database_url():
     """An empty, throwaway database on the same server as TEST_DATABASE_URL,
     dropped (connections and all) after the test."""
     name = f"clearflag_test_scratch_{uuid.uuid4().hex[:12]}"
-    url = make_url(TEST_DATABASE_URL).set(database=name).render_as_string(hide_password=False)
+    url = (
+        make_url(TEST_DATABASE_URL)
+        .set(database=name)
+        .render_as_string(hide_password=False)
+    )
     admin = create_engine(TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
     try:
         with admin.connect() as conn:

@@ -30,7 +30,11 @@ def test_anthropic_client_request_is_blocked():
     client = anthropic.Anthropic(api_key="sk-test-dummy-not-real", max_retries=0)
 
     with pytest.raises(anthropic.APIConnectionError) as exc_info:
-        client.messages.create(model="claude-sonnet-5-5", max_tokens=1, messages=[{"role": "user", "content": "hi"}])
+        client.messages.create(
+            model="claude-sonnet-5-5",
+            max_tokens=1,
+            messages=[{"role": "user", "content": "hi"}],
+        )
 
     assert _blocked_by_guard(exc_info.value)
 
@@ -51,7 +55,9 @@ def test_live_mode_chat_model_is_blocked_even_with_the_ci_toggle_bypassed(monkey
 
 
 def test_langsmith_client_request_is_blocked():
-    client = langsmith.Client(api_key="lsv2-test-dummy-not-real", api_url="https://api.smith.langchain.com")
+    client = langsmith.Client(
+        api_key="lsv2-test-dummy-not-real", api_url="https://api.smith.langchain.com"
+    )
 
     with pytest.raises(langsmith.utils.LangSmithError) as exc_info:
         client.read_project(project_name="clearflag-scrum-54-canary")
@@ -84,18 +90,46 @@ def test_postgres_still_works_under_the_guard():
     ("environ", "ci", "expect_errors", "expect_removed"),
     [
         ({"INVESTIGATION_AGENT_LLM_MODE": "mock"}, True, [], []),
-        ({"INVESTIGATION_AGENT_LLM_MODE": " Live "}, False, ["INVESTIGATION_AGENT_LLM_MODE=live"], []),
+        (
+            {"INVESTIGATION_AGENT_LLM_MODE": " Live "},
+            False,
+            ["INVESTIGATION_AGENT_LLM_MODE=live"],
+            [],
+        ),
         ({"LANGSMITH_TRACING": "true"}, False, ["LANGSMITH_TRACING is truthy"], []),
         ({"LANGCHAIN_TRACING_V2": "1"}, True, ["LANGCHAIN_TRACING_V2 is truthy"], []),
-        ({"LANGSMITH_TRACING_V2": "true"}, True, ["LANGSMITH_TRACING_V2 is truthy"], []),
+        (
+            {"LANGSMITH_TRACING_V2": "true"},
+            True,
+            ["LANGSMITH_TRACING_V2 is truthy"],
+            [],
+        ),
         ({"LANGCHAIN_TRACING": "true"}, False, ["LANGCHAIN_TRACING is truthy"], []),
-        ({"ANTHROPIC_API_KEY": "sk-x", "LANGSMITH_API_KEY": "ls-x"}, True,
-         ["ANTHROPIC_API_KEY is set", "LANGSMITH_API_KEY is set"], []),
-        ({"ANTHROPIC_API_KEY": "sk-x", "LANGCHAIN_API_KEY": "lc-x"}, False, [], ["ANTHROPIC_API_KEY", "LANGCHAIN_API_KEY"]),
+        (
+            {"ANTHROPIC_API_KEY": "sk-x", "LANGSMITH_API_KEY": "ls-x"},
+            True,
+            ["ANTHROPIC_API_KEY is set", "LANGSMITH_API_KEY is set"],
+            [],
+        ),
+        (
+            {"ANTHROPIC_API_KEY": "sk-x", "LANGCHAIN_API_KEY": "lc-x"},
+            False,
+            [],
+            ["ANTHROPIC_API_KEY", "LANGCHAIN_API_KEY"],
+        ),
         ({"ANTHROPIC_API_KEY": "", "LANGSMITH_TRACING": "false"}, True, [], []),
     ],
-    ids=["ci-clean", "local-live", "local-tracing", "ci-legacy-tracing", "ci-tracing-v2", "local-legacy-tracing-v1",
-         "ci-keys-fail", "local-keys-removed", "empty-is-unset"],
+    ids=[
+        "ci-clean",
+        "local-live",
+        "local-tracing",
+        "ci-legacy-tracing",
+        "ci-tracing-v2",
+        "local-legacy-tracing-v1",
+        "ci-keys-fail",
+        "local-keys-removed",
+        "empty-is-unset",
+    ],
 )
 def test_check_environment(environ, ci, expect_errors, expect_removed):
     assert check_environment(environ, ci=ci) == (expect_errors, expect_removed)

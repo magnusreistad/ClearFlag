@@ -38,7 +38,11 @@ ROWS_WITHOUT_CREATED_AT = {
         "longitude": -122.3321,
         "location_label": "Seattle, WA",
     },
-    "transaction_flags": {"transaction_id": 1, "rule_name": "velocity", "rationale": "Flagged: velocity reason."},
+    "transaction_flags": {
+        "transaction_id": 1,
+        "rule_name": "velocity",
+        "rationale": "Flagged: velocity reason.",
+    },
     "agent_rationales": {
         "transaction_id": 1,
         "fact_fingerprint": "fingerprint",
@@ -47,7 +51,11 @@ ROWS_WITHOUT_CREATED_AT = {
         "validation_passed": True,
         "violations": [],
     },
-    "transaction_dispositions": {"transaction_id": 1, "disposition": "false_positive", "rule_names": ["velocity"]},
+    "transaction_dispositions": {
+        "transaction_id": 1,
+        "disposition": "false_positive",
+        "rule_names": ["velocity"],
+    },
 }
 
 
@@ -78,8 +86,12 @@ def test_alembic_upgrade_head_applies_cleanly(migrated_scratch_database_url):
     engine.dispose()
 
 
-def test_server_default_created_at_works_on_every_migrated_table(migrated_scratch_database_url):
-    tables_with_created_at = {table.name for table in Base.metadata.sorted_tables if "created_at" in table.c}
+def test_server_default_created_at_works_on_every_migrated_table(
+    migrated_scratch_database_url,
+):
+    tables_with_created_at = {
+        table.name for table in Base.metadata.sorted_tables if "created_at" in table.c
+    }
     # A new table with a created_at column needs a row above, or this test
     # silently stops covering it.
     assert set(ROWS_WITHOUT_CREATED_AT) == tables_with_created_at
@@ -92,13 +104,17 @@ def test_server_default_created_at_works_on_every_migrated_table(migrated_scratc
     with engine.begin() as conn:
         for table_name, row in ROWS_WITHOUT_CREATED_AT.items():
             table = migrated.tables[table_name]
-            created_at = conn.execute(insert(table).values(**row).returning(table.c.created_at)).scalar_one()
+            created_at = conn.execute(
+                insert(table).values(**row).returning(table.c.created_at)
+            ).scalar_one()
             assert created_at is not None, table_name
             assert created_at.tzinfo is not None, table_name
     engine.dispose()
 
 
-def test_alembic_downgrade_one_step_removes_just_the_follow_up_columns(migrated_scratch_database_url):
+def test_alembic_downgrade_one_step_removes_just_the_follow_up_columns(
+    migrated_scratch_database_url,
+):
     """SCRUM-53 follow-up migration (composed_text, validator_version):
     downgrading past it must remove exactly those two columns and nothing
     else -- the table and its original columns/index stay. Targets the

@@ -59,7 +59,9 @@ def current_model_id() -> str:
     return os.getenv("INVESTIGATION_AGENT_LLM_MODEL", DEFAULT_MODEL)
 
 
-def get_chat_model(*, responses: Iterator[AIMessage | str] | None = None) -> BaseChatModel:
+def get_chat_model(
+    *, responses: Iterator[AIMessage | str] | None = None
+) -> BaseChatModel:
     """Build the chat model for this process, per INVESTIGATION_AGENT_LLM_MODE.
 
     responses: mock mode only. Lets a test inject its own scripted
@@ -70,11 +72,19 @@ def get_chat_model(*, responses: Iterator[AIMessage | str] | None = None) -> Bas
     if not mode:
         mode = "mock"
     if mode not in ("mock", "live"):
-        raise ValueError(f"Unrecognized INVESTIGATION_AGENT_LLM_MODE={mode!r}; must be 'mock' or 'live'.")
+        raise ValueError(
+            f"Unrecognized INVESTIGATION_AGENT_LLM_MODE={mode!r}; must be 'mock' or 'live'."
+        )
 
     if mode == "mock":
         if responses is None:
-            responses = iter([AIMessage(content=f"{MOCK_RESPONSE_PREFIX} canned investigation rationale")])
+            responses = iter(
+                [
+                    AIMessage(
+                        content=f"{MOCK_RESPONSE_PREFIX} canned investigation rationale"
+                    )
+                ]
+            )
         return GenericFakeChatModel(messages=responses)
 
     # mode == "live" from here on. CI is checked before the API key so a demo
@@ -93,10 +103,19 @@ def get_chat_model(*, responses: Iterator[AIMessage | str] | None = None) -> Bas
         )
 
     model = os.getenv("INVESTIGATION_AGENT_LLM_MODEL", DEFAULT_MODEL)
-    timeout = float(os.getenv("INVESTIGATION_AGENT_LLM_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
-    max_retries = int(os.getenv("INVESTIGATION_AGENT_LLM_MAX_RETRIES", DEFAULT_MAX_RETRIES))
+    timeout = float(
+        os.getenv("INVESTIGATION_AGENT_LLM_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)
+    )
+    max_retries = int(
+        os.getenv("INVESTIGATION_AGENT_LLM_MAX_RETRIES", DEFAULT_MAX_RETRIES)
+    )
 
-    kwargs = {"model": model, "api_key": api_key, "timeout": timeout, "max_retries": max_retries}
+    kwargs = {
+        "model": model,
+        "api_key": api_key,
+        "timeout": timeout,
+        "max_retries": max_retries,
+    }
 
     # Not passed at all by default: newer model generations (e.g. the
     # DEFAULT_MODEL above) reject `temperature` outright as deprecated in

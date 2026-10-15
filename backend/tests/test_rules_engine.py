@@ -14,7 +14,9 @@ from app.rules.engine import (
 
 # expire_on_commit=False: like the individual rule tests, these hand ORM
 # objects straight to evaluate_all_rules() after the session closes.
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
+TestingSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
+)
 
 
 BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
@@ -68,9 +70,14 @@ def test_single_rule_hit_is_tagged_with_its_rule_name():
     # deviation's 3-stdev bar. Same merchant throughout so new-merchant risk
     # never gets a second first-time purchase to fire on.
     history = [
-        make_transaction(user_id, BASE_TIME + timedelta(hours=i), amount=Decimal("10.00")) for i in range(5)
+        make_transaction(
+            user_id, BASE_TIME + timedelta(hours=i), amount=Decimal("10.00")
+        )
+        for i in range(5)
     ]
-    outlier = make_transaction(user_id, BASE_TIME + timedelta(hours=5), amount=Decimal("500.00"))
+    outlier = make_transaction(
+        user_id, BASE_TIME + timedelta(hours=5), amount=Decimal("500.00")
+    )
     txns = [*history, outlier]
     db.add_all(txns)
     db.commit()
@@ -120,9 +127,21 @@ def test_transaction_triggering_multiple_rules_gets_one_hit_per_rule():
 
 def test_concatenate_rationales_merges_multi_rule_hits_by_transaction_id():
     hits = [
-        FlagHit(transaction_id=1, rule_name="velocity", rationale="Flagged: velocity reason."),
-        FlagHit(transaction_id=1, rule_name="amount_deviation", rationale="Flagged: amount reason."),
-        FlagHit(transaction_id=2, rule_name="velocity", rationale="Flagged: velocity reason."),
+        FlagHit(
+            transaction_id=1,
+            rule_name="velocity",
+            rationale="Flagged: velocity reason.",
+        ),
+        FlagHit(
+            transaction_id=1,
+            rule_name="amount_deviation",
+            rationale="Flagged: amount reason.",
+        ),
+        FlagHit(
+            transaction_id=2,
+            rule_name="velocity",
+            rationale="Flagged: velocity reason.",
+        ),
     ]
 
     merged = concatenate_rationales(hits)
@@ -139,9 +158,21 @@ def test_concatenate_rationales_empty_input_returns_empty_dict():
 
 def test_rule_names_by_transaction_groups_multi_rule_hits_by_transaction_id():
     hits = [
-        FlagHit(transaction_id=1, rule_name="velocity", rationale="Flagged: velocity reason."),
-        FlagHit(transaction_id=1, rule_name="amount_deviation", rationale="Flagged: amount reason."),
-        FlagHit(transaction_id=2, rule_name="velocity", rationale="Flagged: velocity reason."),
+        FlagHit(
+            transaction_id=1,
+            rule_name="velocity",
+            rationale="Flagged: velocity reason.",
+        ),
+        FlagHit(
+            transaction_id=1,
+            rule_name="amount_deviation",
+            rationale="Flagged: amount reason.",
+        ),
+        FlagHit(
+            transaction_id=2,
+            rule_name="velocity",
+            rationale="Flagged: velocity reason.",
+        ),
     ]
 
     grouped = rule_names_by_transaction(hits)

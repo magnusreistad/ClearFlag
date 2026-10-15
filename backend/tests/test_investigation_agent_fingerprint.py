@@ -35,7 +35,9 @@ PAYLOAD = {
 
 
 def test_fingerprint_is_deterministic_across_runs():
-    assert compute_fact_fingerprint(PAYLOAD) == compute_fact_fingerprint(deepcopy(PAYLOAD))
+    assert compute_fact_fingerprint(PAYLOAD) == compute_fact_fingerprint(
+        deepcopy(PAYLOAD)
+    )
 
 
 def test_fingerprint_changes_when_a_rule_value_changes():

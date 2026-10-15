@@ -39,26 +39,50 @@ from app.rules.engine import (
 
 BASE_TIME = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
 HOME = {"latitude": 47.6062, "longitude": -122.3321, "location_label": "Seattle, WA"}
-MANILA = {"latitude": 14.5995, "longitude": 120.9842, "location_label": "Manila, Philippines"}
+MANILA = {
+    "latitude": 14.5995,
+    "longitude": 120.9842,
+    "location_label": "Manila, Philippines",
+}
 
 
-def _txn(user_id: int, timestamp: datetime, *, merchant: str = "Corner Grocer", category: str = "groceries",
-         amount: str = "10.00", place: dict = HOME) -> Transaction:
-    return Transaction(user_id=user_id, timestamp=timestamp, merchant=merchant, category=category,
-                       amount=Decimal(amount), **place)
+def _txn(
+    user_id: int,
+    timestamp: datetime,
+    *,
+    merchant: str = "Corner Grocer",
+    category: str = "groceries",
+    amount: str = "10.00",
+    place: dict = HOME,
+) -> Transaction:
+    return Transaction(
+        user_id=user_id,
+        timestamp=timestamp,
+        merchant=merchant,
+        category=category,
+        amount=Decimal(amount),
+        **place,
+    )
 
 
 def _daily(user_id: int, count: int, **kwargs) -> list[Transaction]:
     """`count` identical transactions, one per day, ending the day before BASE_TIME."""
-    return [_txn(user_id, BASE_TIME - timedelta(days=count - i), **kwargs) for i in range(count)]
+    return [
+        _txn(user_id, BASE_TIME - timedelta(days=count - i), **kwargs)
+        for i in range(count)
+    ]
 
 
 def _first_purchases(user_id: int, count: int, *, category: str) -> list[Transaction]:
     """`count` first-time purchases at distinct merchants, $10 each -- the
     history new_merchant_risk needs (MIN_HISTORY_COUNT earlier first purchases)."""
     return [
-        _txn(user_id, BASE_TIME - timedelta(days=count - i), merchant=f"Shop {chr(ord('A') + i)} Market",
-             category=category)
+        _txn(
+            user_id,
+            BASE_TIME - timedelta(days=count - i),
+            merchant=f"Shop {chr(ord('A') + i)} Market",
+            category=category,
+        )
         for i in range(count)
     ]
 
@@ -75,7 +99,9 @@ def _seed_amount_deviation(user_id, *, category: str = "groceries"):
     return [*_daily(user_id, 5, category=category), outlier], outlier
 
 
-def add_amount_deviation_outlier(db, user_id: int, *, category: str = "groceries") -> int:
+def add_amount_deviation_outlier(
+    db, user_id: int, *, category: str = "groceries"
+) -> int:
     """The amount_deviation scenario's rows for an existing user, in
     `category` -- for tests that need several independent flagged
     transactions for one user (one per category). Flushes; returns the
@@ -89,7 +115,13 @@ def add_amount_deviation_outlier(db, user_id: int, *, category: str = "groceries
 def _seed_new_merchant_risk(user_id):
     # Different category from the first-purchase history, so amount_deviation
     # (which needs 5 prior transactions in the same category) can't fire.
-    outlier = _txn(user_id, BASE_TIME, merchant="Bright Circuit Electronics", category="electronics", amount="500.00")
+    outlier = _txn(
+        user_id,
+        BASE_TIME,
+        merchant="Bright Circuit Electronics",
+        category="electronics",
+        amount="500.00",
+    )
     return [*_first_purchases(user_id, 5, category="groceries"), outlier], outlier
 
 
@@ -100,8 +132,14 @@ def _seed_geographic_anomaly(user_id):
 
 def _seed_meridian_triple(user_id):
     """SCRUM-65's shape: new merchant + amount outlier + far away, no velocity."""
-    outlier = _txn(user_id, BASE_TIME, merchant="Meridian Duty-Free Traders", category="shopping",
-                   amount="3200.00", place=MANILA)
+    outlier = _txn(
+        user_id,
+        BASE_TIME,
+        merchant="Meridian Duty-Free Traders",
+        category="shopping",
+        amount="3200.00",
+        place=MANILA,
+    )
     return [*_first_purchases(user_id, 5, category="shopping"), outlier], outlier
 
 
@@ -125,19 +163,50 @@ class Scenario:
 SCENARIOS: dict[str, Scenario] = {
     s.name: s
     for s in (
-        Scenario("velocity", _seed_velocity, ("velocity",), frozenset({"get_transaction_history"}), 6),
-        Scenario("amount_deviation", _seed_amount_deviation, ("amount_deviation",), frozenset(), 1),
-        Scenario("new_merchant_risk", _seed_new_merchant_risk, ("new_merchant_risk",),
-                 frozenset({"get_merchant_risk_score"}), 1),
-        Scenario("geographic_anomaly", _seed_geographic_anomaly, ("geographic_anomaly",),
-                 frozenset({"get_geo_distance"}), 1),
-        Scenario("meridian_triple", _seed_meridian_triple,
-                 ("geographic_anomaly", "amount_deviation", "new_merchant_risk"),
-                 frozenset({"get_geo_distance", "get_merchant_risk_score"}), 1),
+        Scenario(
+            "velocity",
+            _seed_velocity,
+            ("velocity",),
+            frozenset({"get_transaction_history"}),
+            6,
+        ),
+        Scenario(
+            "amount_deviation",
+            _seed_amount_deviation,
+            ("amount_deviation",),
+            frozenset(),
+            1,
+        ),
+        Scenario(
+            "new_merchant_risk",
+            _seed_new_merchant_risk,
+            ("new_merchant_risk",),
+            frozenset({"get_merchant_risk_score"}),
+            1,
+        ),
+        Scenario(
+            "geographic_anomaly",
+            _seed_geographic_anomaly,
+            ("geographic_anomaly",),
+            frozenset({"get_geo_distance"}),
+            1,
+        ),
+        Scenario(
+            "meridian_triple",
+            _seed_meridian_triple,
+            ("geographic_anomaly", "amount_deviation", "new_merchant_risk"),
+            frozenset({"get_geo_distance", "get_merchant_risk_score"}),
+            1,
+        ),
         Scenario("zero_rule", _seed_zero_rule, (), frozenset(), 0),
     )
 }
-SINGLE_RULE_SCENARIOS = ("velocity", "amount_deviation", "new_merchant_risk", "geographic_anomaly")
+SINGLE_RULE_SCENARIOS = (
+    "velocity",
+    "amount_deviation",
+    "new_merchant_risk",
+    "geographic_anomaly",
+)
 FLAGGED_SCENARIOS = (*SINGLE_RULE_SCENARIOS, "meridian_triple")
 
 
@@ -167,14 +236,20 @@ def seed_scenario(name: str) -> SeededScenario:
         db.add_all(transactions)
         db.commit()
 
-        all_transactions = db.query(Transaction).filter(Transaction.user_id == user.id).all()
+        all_transactions = (
+            db.query(Transaction).filter(Transaction.user_id == user.id).all()
+        )
         hits = evaluate_all_rules(all_transactions)
         rule_names_by_id = rule_names_by_transaction(hits)
         rule_values_by_id = rule_values_by_transaction(hits)
 
         assert len(rule_names_by_id) == scenario.flagged_count, (name, rule_names_by_id)
         for transaction_id, rule_names in rule_names_by_id.items():
-            assert tuple(rule_names) == scenario.expected_rules, (name, transaction_id, rule_names)
+            assert tuple(rule_names) == scenario.expected_rules, (
+                name,
+                transaction_id,
+                rule_names,
+            )
         if scenario.flagged_count:
             assert primary.id in rule_names_by_id, name
 
@@ -191,7 +266,9 @@ def seed_scenario(name: str) -> SeededScenario:
         db.close()
 
 
-def investigation_state(seeded: SeededScenario, transaction_id: int | None = None) -> InvestigationState:
+def investigation_state(
+    seeded: SeededScenario, transaction_id: int | None = None
+) -> InvestigationState:
     """The state scripts.compose_rationales builds for one flagged transaction."""
     transaction_id = transaction_id or seeded.primary_id
     db = SessionLocal()
@@ -215,7 +292,9 @@ def investigation_state(seeded: SeededScenario, transaction_id: int | None = Non
 # so it passes validation whichever rule fired.
 
 UNGROUNDED_TEXT = "This looks like it happened in Wakanda, which is unusual."
-_LOWERCASE_FILLER = " the amount and location noted above were as expected for this account"
+_LOWERCASE_FILLER = (
+    " the amount and location noted above were as expected for this account"
+)
 
 
 def grounded_text(seeded: SeededScenario) -> str:
@@ -231,15 +310,23 @@ def completion(kind: str, seeded: SeededScenario) -> AIMessage:
         # Grounded, padded with digit- and capital-free filler so the only
         # possible violation is the length cap.
         text = grounded_text(seeded)
-        text += _LOWERCASE_FILLER * ((MAX_RATIONALE_CHARS - len(text)) // len(_LOWERCASE_FILLER) + 2)
+        text += _LOWERCASE_FILLER * (
+            (MAX_RATIONALE_CHARS - len(text)) // len(_LOWERCASE_FILLER) + 2
+        )
         assert len(text) > MAX_RATIONALE_CHARS
         return AIMessage(content=text)
     if kind == "thinking":
         # A live model's extended-thinking response shape (SCRUM-53 regression).
-        return AIMessage(content=[
-            {"type": "thinking", "thinking": "internal reasoning", "signature": "c2lnbmF0dXJl"},
-            {"type": "text", "text": grounded_text(seeded)},
-        ])
+        return AIMessage(
+            content=[
+                {
+                    "type": "thinking",
+                    "thinking": "internal reasoning",
+                    "signature": "c2lnbmF0dXJl",
+                },
+                {"type": "text", "text": grounded_text(seeded)},
+            ]
+        )
     raise ValueError(kind)
 
 

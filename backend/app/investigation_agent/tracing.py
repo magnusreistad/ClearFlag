@@ -36,7 +36,12 @@ from app.investigation_agent.state import InvestigationState
 # one of them "true" still enables tracing (SCRUM-75 found LANGSMITH_TRACING_V2 did). The
 # SCRUM-54 test guard (tests/no_live_guard.py) keeps its own copy of this list, checked against
 # this one by test_no_live_calls.py.
-TRACING_ENV_VARS = ("LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING", "LANGCHAIN_TRACING")
+TRACING_ENV_VARS = (
+    "LANGSMITH_TRACING_V2",
+    "LANGCHAIN_TRACING_V2",
+    "LANGSMITH_TRACING",
+    "LANGCHAIN_TRACING",
+)
 
 
 def _is_truthy(value: str) -> bool:
@@ -73,10 +78,14 @@ def tracing_enabled() -> bool:
     invoke_investigation_graph below) needs the same enforcement the graph run itself gets.
     """
     enforce_no_tracing_in_ci()
-    return _is_truthy(os.getenv("LANGSMITH_TRACING", os.getenv("LANGCHAIN_TRACING_V2", "")))
+    return _is_truthy(
+        os.getenv("LANGSMITH_TRACING", os.getenv("LANGCHAIN_TRACING_V2", ""))
+    )
 
 
-def invoke_investigation_graph(graph: Any, state: InvestigationState) -> InvestigationState:
+def invoke_investigation_graph(
+    graph: Any, state: InvestigationState
+) -> InvestigationState:
     """Preferred entry point for running the compiled investigation_graph (exposed as
     app.investigation_agent.graph.invoke) when trace metadata is wanted: attaches
     transaction_id, the fired rule names, PROMPT_VERSION, and the model id up front via the
@@ -122,7 +131,12 @@ def invoke_investigation_graph(graph: Any, state: InvestigationState) -> Investi
         try:
             from langsmith import Client
 
-            Client().update_run(run_id, extra={"metadata": {"rationale_source": result.get("rationale_source")}})
+            Client().update_run(
+                run_id,
+                extra={
+                    "metadata": {"rationale_source": result.get("rationale_source")}
+                },
+            )
         except Exception:  # noqa: BLE001, S110 -- dev observability only; a trace-patch failure must never affect the result, and there's no logging infra in this project to route it to.
             pass
 

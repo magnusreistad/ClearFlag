@@ -36,9 +36,13 @@ from app.rules.geographic_anomaly import evaluate_geographic_anomaly
 from app.rules.new_merchant_risk import evaluate_new_merchant_risk
 from app.rules.velocity import evaluate_velocity
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "investigation_agent_meridian_843.json"
+FIXTURE_PATH = (
+    Path(__file__).parent / "fixtures" / "investigation_agent_meridian_843.json"
+)
 
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
+TestingSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
+)
 
 
 BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
@@ -69,7 +73,9 @@ def _assert_hit_grounds_itself(transaction: Transaction, rule_name: str, hit) ->
     """The core SCRUM-68 cross-check: hit.rationale must validate against a
     payload built purely from hit.values and the transaction snapshot --
     evidence={} (no tool call in this run at all)."""
-    payload = build_payload(_transaction_data(transaction), [rule_name], {rule_name: hit.values})
+    payload = build_payload(
+        _transaction_data(transaction), [rule_name], {rule_name: hit.values}
+    )
 
     result = validate_rationale(hit.rationale, payload, evidence={})
 
@@ -107,7 +113,13 @@ class TestAmountDeviationGroundsItself:
     def test_outlier_rationale_grounds_against_its_own_values(self):
         db = TestingSessionLocal()
         user_id = new_user(db)
-        history_amounts = [Decimal("60.00"), Decimal("55.00"), Decimal("70.00"), Decimal("65.00"), Decimal("58.00")]
+        history_amounts = [
+            Decimal("60.00"),
+            Decimal("55.00"),
+            Decimal("70.00"),
+            Decimal("65.00"),
+            Decimal("58.00"),
+        ]
         txns = [
             Transaction(
                 user_id=user_id,
@@ -145,7 +157,13 @@ class TestNewMerchantRiskGroundsItself:
     def test_outlier_first_purchase_rationale_grounds_against_its_own_values(self):
         db = TestingSessionLocal()
         user_id = new_user(db)
-        history_amounts = [Decimal("60.00"), Decimal("55.00"), Decimal("70.00"), Decimal("65.00"), Decimal("58.00")]
+        history_amounts = [
+            Decimal("60.00"),
+            Decimal("55.00"),
+            Decimal("70.00"),
+            Decimal("65.00"),
+            Decimal("58.00"),
+        ]
         txns = [
             Transaction(
                 user_id=user_id,
@@ -236,9 +254,18 @@ class TestMeridian843ThreeRuleCase:
         payload = raw["payload"]
         payload["transaction"]["amount"] = Decimal(payload["transaction"]["amount"])
         for key in ("amount", "category_mean", "category_stdev", "percent_above_mean"):
-            payload["rules"]["amount_deviation"][key] = Decimal(payload["rules"]["amount_deviation"][key])
-        for key in ("amount", "typical_first_purchase_mean", "typical_first_purchase_stdev", "percent_above_mean"):
-            payload["rules"]["new_merchant_risk"][key] = Decimal(payload["rules"]["new_merchant_risk"][key])
+            payload["rules"]["amount_deviation"][key] = Decimal(
+                payload["rules"]["amount_deviation"][key]
+            )
+        for key in (
+            "amount",
+            "typical_first_purchase_mean",
+            "typical_first_purchase_stdev",
+            "percent_above_mean",
+        ):
+            payload["rules"]["new_merchant_risk"][key] = Decimal(
+                payload["rules"]["new_merchant_risk"][key]
+            )
         return payload
 
     # Captured verbatim from the same evaluate_all_rules() run that produced
@@ -255,16 +282,24 @@ class TestMeridian843ThreeRuleCase:
         ),
     }
 
-    @pytest.mark.parametrize("rule_name", ["geographic_anomaly", "amount_deviation", "new_merchant_risk"])
-    def test_each_rules_own_rationale_grounds_against_the_shared_payload(self, payload, rule_name):
+    @pytest.mark.parametrize(
+        "rule_name", ["geographic_anomaly", "amount_deviation", "new_merchant_risk"]
+    )
+    def test_each_rules_own_rationale_grounds_against_the_shared_payload(
+        self, payload, rule_name
+    ):
         rationale = self.RATIONALE_BY_RULE[rule_name]
 
         result = validate_rationale(rationale, payload, evidence={})
 
         assert result.passed is True, result.violations
 
-    def test_concatenated_three_rule_rationale_grounds_against_the_shared_payload(self, payload):
-        concatenated = " ".join(self.RATIONALE_BY_RULE[name] for name in payload["rule_names"])
+    def test_concatenated_three_rule_rationale_grounds_against_the_shared_payload(
+        self, payload
+    ):
+        concatenated = " ".join(
+            self.RATIONALE_BY_RULE[name] for name in payload["rule_names"]
+        )
 
         result = validate_rationale(concatenated, payload, evidence={})
 

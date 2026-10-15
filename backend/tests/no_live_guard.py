@@ -34,7 +34,12 @@ LLM_MODE_VAR = "INVESTIGATION_AGENT_LLM_MODE"
 # app.investigation_agent.tracing.TRACING_ENV_VARS rather than an import --
 # this module runs before any app import -- kept equal to it by
 # test_no_live_calls.py.
-TRACING_VARS = ("LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING", "LANGCHAIN_TRACING")
+TRACING_VARS = (
+    "LANGSMITH_TRACING_V2",
+    "LANGCHAIN_TRACING_V2",
+    "LANGSMITH_TRACING",
+    "LANGCHAIN_TRACING",
+)
 API_KEY_VARS = ("ANTHROPIC_API_KEY", "LANGSMITH_API_KEY", "LANGCHAIN_API_KEY")
 
 
@@ -51,13 +56,17 @@ def _is_truthy(value: str) -> bool:
     return value.strip().lower() not in ("", "false", "0", "no")
 
 
-def check_environment(environ: Mapping[str, str], *, ci: bool) -> tuple[list[str], list[str]]:
+def check_environment(
+    environ: Mapping[str, str], *, ci: bool
+) -> tuple[list[str], list[str]]:
     """Returns (errors, keys_to_remove). Empty-string keys (e.g. .env.example's
     `ANTHROPIC_API_KEY=`) count as unset."""
     errors = []
     if environ.get(LLM_MODE_VAR, "").strip().lower() == "live":
         errors.append(f"{LLM_MODE_VAR}=live")
-    errors.extend(f"{var} is truthy" for var in TRACING_VARS if _is_truthy(environ.get(var, "")))
+    errors.extend(
+        f"{var} is truthy" for var in TRACING_VARS if _is_truthy(environ.get(var, ""))
+    )
 
     keys_set = [var for var in API_KEY_VARS if environ.get(var, "").strip()]
     if ci:
@@ -71,7 +80,9 @@ def enforce_environment() -> None:
     pytest.UsageError on any error, otherwise blanks local API keys (one
     warning naming them, never their values) and clears langsmith's cached
     env reads so nothing read earlier in the process survives."""
-    errors, keys_to_remove = check_environment(os.environ, ci=_is_truthy(os.environ.get("CI", "")))
+    errors, keys_to_remove = check_environment(
+        os.environ, ci=_is_truthy(os.environ.get("CI", ""))
+    )
     if errors:
         raise pytest.UsageError(
             "Refusing to run the test suite with live-call configuration present "
@@ -115,7 +126,9 @@ def _is_loopback(host) -> bool:
 def _check_address(address) -> None:
     # AF_UNIX addresses are a path (str/bytes), never outbound.
     if isinstance(address, tuple) and not _is_loopback(address[0]):
-        raise LiveCallBlocked(f"Outbound network access is blocked in tests (attempted {address[0]!r}).")
+        raise LiveCallBlocked(
+            f"Outbound network access is blocked in tests (attempted {address[0]!r})."
+        )
 
 
 def install_network_block(monkeypatch: pytest.MonkeyPatch) -> None:

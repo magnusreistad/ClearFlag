@@ -65,7 +65,11 @@ def _lookup_agent_rationales(
     """
     fingerprint_by_id = {
         transaction_id: compute_fact_fingerprint(
-            build_payload(transaction_data, rule_names_by_id[transaction_id], rule_values_by_id.get(transaction_id, {}))
+            build_payload(
+                transaction_data,
+                rule_names_by_id[transaction_id],
+                rule_values_by_id.get(transaction_id, {}),
+            )
         )
         for transaction_id, transaction_data in flagged_transaction_data.items()
     }
@@ -87,9 +91,9 @@ def _lookup_agent_rationales(
             rows = (
                 db.query(AgentRationale)
                 .filter(
-                    tuple_(AgentRationale.transaction_id, AgentRationale.fact_fingerprint).in_(
-                        list(fingerprint_by_id.items())
-                    ),
+                    tuple_(
+                        AgentRationale.transaction_id, AgentRationale.fact_fingerprint
+                    ).in_(list(fingerprint_by_id.items())),
                     AgentRationale.prompt_version == PROMPT_VERSION,
                     AgentRationale.validation_passed.is_(True),
                 )
@@ -107,10 +111,16 @@ def _lookup_agent_rationales(
         if current is None or row.created_at > current.created_at:
             latest_by_id[row.transaction_id] = row
 
-    return {transaction_id: row.rationale for transaction_id, row in latest_by_id.items() if row.rationale}
+    return {
+        transaction_id: row.rationale
+        for transaction_id, row in latest_by_id.items()
+        if row.rationale
+    }
 
 
-def _refresh_flags(db: Session, user_id: int) -> tuple[dict[int, str], dict[int, list[str]]]:
+def _refresh_flags(
+    db: Session, user_id: int
+) -> tuple[dict[int, str], dict[int, list[str]]]:
     """Re-run the rules engine over a user's full transaction history and
     replace their persisted flags with the fresh result.
 
@@ -132,22 +142,30 @@ def _refresh_flags(db: Session, user_id: int) -> tuple[dict[int, str], dict[int,
     triggering a lazy-refresh SELECT per transaction.
     """
     with _flags_refresh_lock:
-        all_transactions = db.query(Transaction).filter(Transaction.user_id == user_id).all()
+        all_transactions = (
+            db.query(Transaction).filter(Transaction.user_id == user_id).all()
+        )
         hits = evaluate_all_rules(all_transactions)
         rule_names_by_id = rule_names_by_transaction(hits)
         rule_values_by_id = rule_values_by_transaction(hits)
         transactions_by_id = {t.id: t for t in all_transactions}
         flagged_transaction_data = {
-            transaction_id: transaction_data_from_orm(transactions_by_id[transaction_id])
+            transaction_id: transaction_data_from_orm(
+                transactions_by_id[transaction_id]
+            )
             for transaction_id in rule_names_by_id
         }
 
         transaction_ids = [t.id for t in all_transactions]
-        db.query(TransactionFlag).filter(TransactionFlag.transaction_id.in_(transaction_ids)).delete(
-            synchronize_session=False
-        )
+        db.query(TransactionFlag).filter(
+            TransactionFlag.transaction_id.in_(transaction_ids)
+        ).delete(synchronize_session=False)
         db.add_all(
-            TransactionFlag(transaction_id=hit.transaction_id, rule_name=hit.rule_name, rationale=hit.rationale)
+            TransactionFlag(
+                transaction_id=hit.transaction_id,
+                rule_name=hit.rule_name,
+                rationale=hit.rationale,
+            )
             for hit in hits
         )
         db.commit()
@@ -161,7 +179,9 @@ def _refresh_flags(db: Session, user_id: int) -> tuple[dict[int, str], dict[int,
     return {**interim_rationale_by_id, **agent_rationale_by_id}, rule_names_by_id
 
 
-def _current_dispositions(db: Session, transaction_ids: list[int]) -> dict[int, TransactionDisposition]:
+def _current_dispositions(
+    db: Session, transaction_ids: list[int]
+) -> dict[int, TransactionDisposition]:
     """SCRUM-29. The latest disposition for each of `transaction_ids`, in
     one query (DISTINCT ON, served by
     ix_transaction_dispositions_transaction_latest) -- so a page costs one
@@ -212,7 +232,9 @@ def _to_transaction_out(
         rule_names=rule_names_by_id.get(t.id, []),
         disposition=(
             CurrentDisposition(
-                value=disposition.disposition, note=disposition.note, created_at=disposition.created_at
+                value=disposition.disposition,
+                note=disposition.note,
+                created_at=disposition.created_at,
             )
             if disposition is not None
             else None
@@ -232,16 +254,16 @@ def list_transactions(
     query = db.query(Transaction).filter(Transaction.user_id == user_id)
     total = query.count()
     transactions = (
-        query.order_by(Transaction.timestamp.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
+        query.order_by(Transaction.timestamp.desc()).offset(offset).limit(limit).all()
     )
     # After pagination (only this page's ids) and outside _refresh_flags'
     # lock -- dispositions aren't touched by the flag refresh.
     disposition_by_id = _current_dispositions(db, [t.id for t in transactions])
     return TransactionListResponse(
-        items=[_to_transaction_out(t, rationale_by_id, rule_names_by_id, disposition_by_id) for t in transactions],
+        items=[
+            _to_transaction_out(t, rationale_by_id, rule_names_by_id, disposition_by_id)
+            for t in transactions
+        ],
         total=total,
         limit=limit,
         offset=offset,
@@ -289,7 +311,9 @@ def create_disposition(
         .order_by(TransactionFlag.id)
     ]
     if not rule_names:
-        raise HTTPException(status_code=409, detail="Transaction has no active flags to disposition")
+        raise HTTPException(
+            status_code=409, detail="Transaction has no active flags to disposition"
+        )
 
     disposition = TransactionDisposition(
         transaction_id=transaction_id,

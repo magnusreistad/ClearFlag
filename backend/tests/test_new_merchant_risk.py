@@ -12,7 +12,9 @@ from app.rules.new_merchant_risk import evaluate_new_merchant_risk
 # objects straight to evaluate_new_merchant_risk() after the session closes,
 # so their attributes must stay readable without a live session to refresh
 # from.
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
+TestingSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
+)
 
 
 BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
@@ -44,12 +46,16 @@ def new_user(db: Session) -> int:
     return user.id
 
 
-def create_first_time_purchases(db: Session, user_id: int, amounts: list[Decimal]) -> list[Transaction]:
+def create_first_time_purchases(
+    db: Session, user_id: int, amounts: list[Decimal]
+) -> list[Transaction]:
     """One transaction per amount, each at its own distinct merchant, spaced
     a day apart in list order (so creation order is also timestamp order and
     every transaction is guaranteed to be a first-time purchase)."""
     txns = [
-        make_transaction(user_id, BASE_TIME + timedelta(days=i), f"Merchant {i}", amount)
+        make_transaction(
+            user_id, BASE_TIME + timedelta(days=i), f"Merchant {i}", amount
+        )
         for i, amount in enumerate(amounts)
     ]
     db.add_all(txns)
@@ -57,7 +63,13 @@ def create_first_time_purchases(db: Session, user_id: int, amounts: list[Decimal
     return txns
 
 
-HISTORY = [Decimal("60.00"), Decimal("55.00"), Decimal("70.00"), Decimal("65.00"), Decimal("58.00")]
+HISTORY = [
+    Decimal("60.00"),
+    Decimal("55.00"),
+    Decimal("70.00"),
+    Decimal("65.00"),
+    Decimal("58.00"),
+]
 # mean=61.60, sample stdev=~5.94 -- anything above 61.60 + 3*5.94 = ~79.42
 # clears the default threshold.
 
@@ -127,7 +139,9 @@ def test_values_populated_with_expected_keys_and_correct_figures():
     hits = evaluate_new_merchant_risk(txns)
 
     expected_mean = mean(HISTORY)
-    expected_stdev = stdev(HISTORY)  # already above MIN_STD_DEV_FLOOR, so the floor is inert
+    expected_stdev = stdev(
+        HISTORY
+    )  # already above MIN_STD_DEV_FLOOR, so the floor is inert
     expected_pct = (Decimal("540.00") - expected_mean) / expected_mean * 100
     assert hits[0].values == {
         "amount": Decimal("540.00"),
@@ -156,7 +170,9 @@ def test_exactly_one_prior_first_purchase_does_not_flag():
     # A single prior first-time purchase isn't enough for a meaningful
     # average/stdev -- must not flag or crash trying to compute stdev of one
     # sample.
-    txns = create_first_time_purchases(db, user_id, [Decimal("50.00"), Decimal("999.00")])
+    txns = create_first_time_purchases(
+        db, user_id, [Decimal("50.00"), Decimal("999.00")]
+    )
     db.close()
 
     hits = evaluate_new_merchant_risk(txns)
@@ -181,7 +197,9 @@ def test_zero_variance_history_does_not_explode_on_tiny_deviation():
     # Five identical first-purchase amounts at five distinct merchants
     # (stdev=0), then a $1.50 bump -- small in absolute terms, but
     # "infinite" stdevs without the floor.
-    txns = create_first_time_purchases(db, user_id, [Decimal("9.99")] * 5 + [Decimal("11.49")])
+    txns = create_first_time_purchases(
+        db, user_id, [Decimal("9.99")] * 5 + [Decimal("11.49")]
+    )
     db.close()
 
     hits = evaluate_new_merchant_risk(txns)
@@ -192,7 +210,9 @@ def test_zero_variance_history_does_not_explode_on_tiny_deviation():
 def test_zero_variance_history_still_flags_large_deviation():
     db = TestingSessionLocal()
     user_id = new_user(db)
-    txns = create_first_time_purchases(db, user_id, [Decimal("9.99")] * 5 + [Decimal("500.00")])
+    txns = create_first_time_purchases(
+        db, user_id, [Decimal("9.99")] * 5 + [Decimal("500.00")]
+    )
     db.close()
 
     hits = evaluate_new_merchant_risk(txns)
@@ -215,7 +235,9 @@ def test_unusually_low_first_purchase_does_not_flag():
 def test_repeat_transaction_never_flags_regardless_of_amount():
     db = TestingSessionLocal()
     user_id = new_user(db)
-    first_purchases = create_first_time_purchases(db, user_id, [*HISTORY, Decimal("62.00")])
+    first_purchases = create_first_time_purchases(
+        db, user_id, [*HISTORY, Decimal("62.00")]
+    )
     # A huge repeat purchase at an already-seen merchant -- must never flag,
     # no matter how far it would clear the threshold if it were (wrongly)
     # treated as a first-time purchase.
@@ -239,8 +261,15 @@ def test_multiple_first_time_merchants_same_day_evaluated_independently():
     user_id = new_user(db)
     first_purchases = create_first_time_purchases(db, user_id, HISTORY)
     same_day = BASE_TIME + timedelta(days=len(HISTORY), hours=1)
-    normal = make_transaction(user_id, same_day, "Normal New Merchant", Decimal("70.00"))
-    outlier = make_transaction(user_id, same_day + timedelta(minutes=5), "Outlier New Merchant", Decimal("540.00"))
+    normal = make_transaction(
+        user_id, same_day, "Normal New Merchant", Decimal("70.00")
+    )
+    outlier = make_transaction(
+        user_id,
+        same_day + timedelta(minutes=5),
+        "Outlier New Merchant",
+        Decimal("540.00"),
+    )
     db.add_all([normal, outlier])
     db.commit()
     db.close()

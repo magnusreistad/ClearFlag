@@ -19,7 +19,9 @@ from app.investigation_agent.derived_facts import (
 from app.investigation_agent.prompts import MAX_RATIONALE_CHARS
 from app.investigation_agent.validation import validate_rationale
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "investigation_agent_meridian_843.json"
+FIXTURE_PATH = (
+    Path(__file__).parent / "fixtures" / "investigation_agent_meridian_843.json"
+)
 
 
 def _load_fixture() -> tuple[dict, dict]:
@@ -30,7 +32,12 @@ def _load_fixture() -> tuple[dict, dict]:
     for key in ("amount", "category_mean", "category_stdev", "percent_above_mean"):
         amount_deviation[key] = Decimal(amount_deviation[key])
     new_merchant_risk = payload["rules"]["new_merchant_risk"]
-    for key in ("amount", "typical_first_purchase_mean", "typical_first_purchase_stdev", "percent_above_mean"):
+    for key in (
+        "amount",
+        "typical_first_purchase_mean",
+        "typical_first_purchase_stdev",
+        "percent_above_mean",
+    ):
         new_merchant_risk[key] = Decimal(new_merchant_risk[key])
     evidence = deepcopy(raw["evidence"])
     return payload, evidence
@@ -75,7 +82,9 @@ class TestNumericGrounding:
 
     def test_wrong_unit_fails_even_though_the_number_exists_as_km(self, meridian):
         payload, evidence = meridian
-        rationale = "This occurred 10,864 miles from Seattle, WA, your typical location."
+        rationale = (
+            "This occurred 10,864 miles from Seattle, WA, your typical location."
+        )
 
         result = validate_rationale(rationale, payload, evidence)
 
@@ -129,7 +138,9 @@ class TestNamedEntityGrounding:
 
     def test_citable_merchant_and_location_do_not_trigger_a_violation(self, meridian):
         payload, evidence = meridian
-        rationale = "Your purchase from Meridian Duty-Free Traders was far from Seattle, WA."
+        rationale = (
+            "Your purchase from Meridian Duty-Free Traders was far from Seattle, WA."
+        )
 
         result = validate_rationale(rationale, payload, evidence)
 
@@ -145,7 +156,9 @@ class TestBareSingleWordEntityGrounding:
 
     def test_bare_invented_place_with_no_comma_fails(self, meridian):
         payload, evidence = meridian
-        rationale = "This transaction occurred in Tokyo, which is unusual for this account."
+        rationale = (
+            "This transaction occurred in Tokyo, which is unusual for this account."
+        )
 
         result = validate_rationale(rationale, payload, evidence)
 
@@ -154,18 +167,24 @@ class TestBareSingleWordEntityGrounding:
         assert violation.violation_type == "unsupported_entity"
         assert violation.span == "Tokyo"
 
-    def test_bare_citable_single_word_from_a_multiword_fact_does_not_trigger_a_violation(self, meridian):
-        """"Manila" alone is a real substring of the citable location_label
+    def test_bare_citable_single_word_from_a_multiword_fact_does_not_trigger_a_violation(
+        self, meridian
+    ):
+        """ "Manila" alone is a real substring of the citable location_label
         "Manila, Philippines" -- it must ground on its own, not just when
         written with its full ", Philippines" suffix."""
         payload, evidence = meridian
-        rationale = "This transaction occurred in Manila, which is unusual for this account."
+        rationale = (
+            "This transaction occurred in Manila, which is unusual for this account."
+        )
 
         result = validate_rationale(rationale, payload, evidence)
 
         assert result.passed is True
 
-    def test_sentence_initial_uncitable_word_now_fails_unless_a_common_word(self, meridian):
+    def test_sentence_initial_uncitable_word_now_fails_unless_a_common_word(
+        self, meridian
+    ):
         """SCRUM-53 round 2/3: sentence-initial position is no longer a
         blanket pass on its own -- that was the reopened hole (a
         model-invented place name dropped at the start of a sentence used to
@@ -195,25 +214,37 @@ class TestBareSingleWordEntityGrounding:
         result = validate_rationale(rationale, payload, evidence)
 
         assert result.passed is False
-        assert any(v.violation_type == "unsupported_entity" and v.span == "Singapore" for v in result.violations)
+        assert any(
+            v.violation_type == "unsupported_entity" and v.span == "Singapore"
+            for v in result.violations
+        )
 
-    def test_bare_invented_entity_right_after_the_flagged_colon_prefix_fails(self, meridian):
+    def test_bare_invented_entity_right_after_the_flagged_colon_prefix_fails(
+        self, meridian
+    ):
         """The same regression, but immediately after the interim
         formatter's own "Flagged: " marker -- proving the marker is no
         longer treated as a generic "any colon exempts what follows" rule."""
         payload, evidence = meridian
-        rationale = "Flagged: Singapore is 9,000 miles from Seattle, WA, your typical location."
+        rationale = (
+            "Flagged: Singapore is 9,000 miles from Seattle, WA, your typical location."
+        )
 
         result = validate_rationale(rationale, payload, evidence)
 
         assert result.passed is False
-        assert any(v.violation_type == "unsupported_entity" and v.span == "Singapore" for v in result.violations)
+        assert any(
+            v.violation_type == "unsupported_entity" and v.span == "Singapore"
+            for v in result.violations
+        )
 
     @pytest.mark.parametrize(
         "invented_place",
         ["Singapore", "Tokyo", "Paris", "London", "China", "Lagos", "Bangkok"],
     )
-    def test_invented_places_at_sentence_start_still_fail(self, meridian, invented_place):
+    def test_invented_places_at_sentence_start_still_fail(
+        self, meridian, invented_place
+    ):
         """SCRUM-53 round 3 regression guard: these are exactly the kind of
         word a stray proper noun in a "common words" list would wrongly
         exempt -- none of them are citable in the Meridian fixture, and none
@@ -228,14 +259,29 @@ class TestBareSingleWordEntityGrounding:
 
         assert result.passed is False
         assert any(
-            v.violation_type == "unsupported_entity" and v.span == invented_place for v in result.violations
+            v.violation_type == "unsupported_entity" and v.span == invented_place
+            for v in result.violations
         )
 
     @pytest.mark.parametrize(
         "starter",
         [
-            "This", "It's", "You", "Your", "The", "A", "An", "These", "That", "We", "If",
-            "However", "Additionally", "Because", "Together", "Overall",
+            "This",
+            "It's",
+            "You",
+            "Your",
+            "The",
+            "A",
+            "An",
+            "These",
+            "That",
+            "We",
+            "If",
+            "However",
+            "Additionally",
+            "Because",
+            "Together",
+            "Overall",
         ],
     )
     def test_common_sentence_starters_are_not_flagged(self, meridian, starter):
@@ -257,17 +303,21 @@ class TestBareSingleWordEntityGrounding:
         assert result.passed is True, result.violations
 
     def test_flagged_prefix_word_itself_is_never_flagged(self, meridian):
-        """"Flagged" immediately followed by ':' is the interim formatter's
+        """ "Flagged" immediately followed by ':' is the interim formatter's
         own template keyword, not a proper noun -- it must never be checked
         for citability, independent of the common-word dictionary check."""
         payload, evidence = meridian
-        rationale = "Flagged: This is your first purchase from Meridian Duty-Free Traders."
+        rationale = (
+            "Flagged: This is your first purchase from Meridian Duty-Free Traders."
+        )
 
         result = validate_rationale(rationale, payload, evidence)
 
         assert result.passed is True
 
-    def test_interim_formatters_flagged_colon_subject_prefix_is_not_flagged(self, meridian):
+    def test_interim_formatters_flagged_colon_subject_prefix_is_not_flagged(
+        self, meridian
+    ):
         """Every app.rules.* rationale reads "Flagged: <Subject> ..." with a
         different capitalized subject per rule ("This", "It's", "You") --
         _is_sentence_initial treats ':' as a clause boundary specifically so
@@ -282,7 +332,7 @@ class TestBareSingleWordEntityGrounding:
         assert result.passed is True
 
     def test_pronoun_i_is_never_flagged_even_mid_sentence(self, meridian):
-        """"I" is the one common English word that's capitalized regardless
+        """ "I" is the one common English word that's capitalized regardless
         of position, so it can't be exempted by the positional rule alone
         (unlike "Flagged: <Subject>" above) -- this places it genuinely
         mid-sentence (not sentence-initial) to actually exercise
@@ -338,7 +388,9 @@ class TestScrum53Round3LiveRegression:
             "new_merchant_risk": {
                 "amount": Decimal("610.00"),
                 "typical_first_purchase_mean": Decimal("38.64379310344827586206896552"),
-                "typical_first_purchase_stdev": Decimal("29.67773894133363285313806290"),
+                "typical_first_purchase_stdev": Decimal(
+                    "29.67773894133363285313806290"
+                ),
                 "percent_above_mean": Decimal("1478.519992504483924794988712"),
             },
         },
@@ -369,7 +421,9 @@ class TestScrum53Round3LiveRegression:
             "with a new merchant."
         )
 
-        result = validate_rationale(rationale_without_together_sentence, self.PAYLOAD_839, evidence={})
+        result = validate_rationale(
+            rationale_without_together_sentence, self.PAYLOAD_839, evidence={}
+        )
 
         assert result.passed is True, result.violations
 
@@ -392,7 +446,9 @@ class TestInflectedFormsAtSentenceStart:
         -- confirmed present in the bundled list -- so stripping the regular
         plural/-ing/-ed inflection should recover it."""
         payload, evidence = meridian
-        rationale = f"This is a routine notice. {word} something unrelated to this account."
+        rationale = (
+            f"This is a routine notice. {word} something unrelated to this account."
+        )
 
         result = validate_rationale(rationale, payload, evidence)
 
@@ -412,7 +468,9 @@ class TestInflectedFormsAtSentenceStart:
         assert any(v.span == "Transactions" for v in result.violations)
 
     @pytest.mark.parametrize("invented_place_form", ["Tokyo's", "Londons"])
-    def test_inflected_or_possessive_place_names_still_fail(self, meridian, invented_place_form):
+    def test_inflected_or_possessive_place_names_still_fail(
+        self, meridian, invented_place_form
+    ):
         """Guards the fix from reopening the proper-noun hole via an
         inflected/possessive form: "Tokyo's" is handled by the apostrophe-
         stem check (stem "tokyo" absent from NGSL); "Londons" hits the
@@ -439,7 +497,9 @@ class TestErroredToolNotCitable:
 
     def test_tool_only_numeric_value_fails(self, meridian):
         payload, evidence = meridian
-        del evidence["get_geo_distance"]  # simulates get_geo_distance raising (SCRUM-51 tool_errors)
+        del evidence[
+            "get_geo_distance"
+        ]  # simulates get_geo_distance raising (SCRUM-51 tool_errors)
         rationale = "This occurred 10,864.40 km from your typical location."
 
         result = validate_rationale(rationale, payload, evidence)
@@ -450,7 +510,9 @@ class TestErroredToolNotCitable:
 
     def test_tool_only_entity_fails(self, meridian):
         payload, evidence = meridian
-        del evidence["get_geo_distance"]  # simulates get_geo_distance raising (SCRUM-51 tool_errors)
+        del evidence[
+            "get_geo_distance"
+        ]  # simulates get_geo_distance raising (SCRUM-51 tool_errors)
         rationale = "This is far from Seattle, WA, your typical location."
 
         result = validate_rationale(rationale, payload, evidence)
@@ -459,7 +521,9 @@ class TestErroredToolNotCitable:
         assert _violation_types(result) == ["unsupported_entity"]
         assert result.violations[0].span == "Seattle, WA"
 
-    def test_distance_miles_still_grounds_when_the_tool_fails_since_the_rule_also_computes_it(self, meridian):
+    def test_distance_miles_still_grounds_when_the_tool_fails_since_the_rule_also_computes_it(
+        self, meridian
+    ):
         """Confirms the SCRUM-68 restoration deliberately: distance_miles is
         NOT tool-only anymore, so it stays citable even with get_geo_distance
         evidence removed -- this is the intended behavior change, not a gap.
@@ -535,12 +599,16 @@ class TestLengthCap:
 
         result = validate_rationale(rationale, payload, evidence)
 
-        [length_violation] = [v for v in result.violations if v.violation_type == "rationale_too_long"]
+        [length_violation] = [
+            v for v in result.violations if v.violation_type == "rationale_too_long"
+        ]
         assert str(MAX_RATIONALE_CHARS + 50) in length_violation.reason
 
 
 class TestDerivedFacts:
-    def test_percent_above_category_mean_matches_interim_formatters_formula(self, meridian):
+    def test_percent_above_category_mean_matches_interim_formatters_formula(
+        self, meridian
+    ):
         payload, _evidence = meridian
         amount = payload["rules"]["amount_deviation"]["amount"]
         category_mean = payload["rules"]["amount_deviation"]["category_mean"]
@@ -560,6 +628,8 @@ class TestDerivedFacts:
         assert round(derived["amount_deviation"]["percent_above_mean"]) == 1873
 
     def test_compute_derived_facts_omits_a_rule_with_no_payload_data(self):
-        derived = compute_derived_facts({"transaction": {}, "rule_names": [], "rules": {}})
+        derived = compute_derived_facts(
+            {"transaction": {}, "rule_names": [], "rules": {}}
+        )
 
         assert derived == {}
