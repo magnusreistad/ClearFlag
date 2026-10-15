@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual runs from the Actions tab, e.g. repeated timing runs.
+  workflow_dispatch:
 
 jobs:
   backend-lint-test:
