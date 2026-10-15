@@ -62,6 +62,9 @@ jobs:
       - name: Lint with ruff
         run: ruff check .
 
+      - name: Check formatting with ruff
+        run: ruff format --check .
+
       # Exercises the migrations through the real CLI against the fresh service
       # database, as a step of its own so a broken migration fails here by name
       # rather than inside a test fixture. (tests/conftest.py then rebuilds the
