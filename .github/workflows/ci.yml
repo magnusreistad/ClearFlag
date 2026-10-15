@@ -70,21 +70,41 @@ jobs:
       - name: Run tests
         run: pytest
 
-  # Frontend job placeholder — uncomment and fill in once the React app
-  # is scaffolded in Sprint 3. Keeping this commented out avoids a
-  # failing/red CI badge for a frontend that doesn't exist yet.
-  #
-  # frontend-lint-test:
-  #   name: Frontend Lint & Test
-  #   runs-on: ubuntu-latest
-  #   defaults:
-  #     run:
-  #       working-directory: ./frontend
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-node@v4
-  #       with:
-  #         node-version: "20"
-  #     - run: npm ci
-  #     - run: npm run lint
-  #     - run: npm test -- --watchAll=false
+  # Runs alongside the backend job (no `needs:`), so CI wall time is the
+  # slower of the two.
+  frontend-lint-test:
+    name: Frontend Lint & Test
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # Node 24 LTS satisfies Vite 8 (^20.19 || >=22.12). SCRUM-73's .nvmrc
+      # will replace this with node-version-file.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          # Explicit: setup-node only auto-caches when package.json has a
+          # packageManager field, and the lockfile isn't at the repo root.
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint with oxlint
+        run: npm run lint
+
+      - name: Run tests
+        run: npx vitest run
+
+      # tsc -b then vite build: the only step that typechecks, since Vitest
+      # strips types without checking them.
+      - name: Typecheck and build
+        run: npm run build
