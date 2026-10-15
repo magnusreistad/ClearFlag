@@ -1,2 +1,2 @@
-ruff
-pytest
+ruff==0.17.0
+pytest==9.1.1
