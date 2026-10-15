@@ -12,7 +12,10 @@ client = TestClient(app)
 
 
 def make_transaction(
-    user_id: int, days_ago: int, merchant: str = "Test Merchant", amount: Decimal = Decimal("10.00")
+    user_id: int,
+    days_ago: int,
+    merchant: str = "Test Merchant",
+    amount: Decimal = Decimal("10.00"),
 ) -> Transaction:
     return Transaction(
         user_id=user_id,
@@ -38,12 +41,16 @@ def test_list_transactions_scoped_and_sorted_by_timestamp_desc():
     db.add_all([user_a, user_b])
     db.flush()
 
-    db.add_all([
-        make_transaction(user_a.id, days_ago=2, merchant="Older"),
-        make_transaction(user_a.id, days_ago=0, merchant="Newest"),
-        make_transaction(user_a.id, days_ago=1, merchant="Middle"),
-        make_transaction(user_b.id, days_ago=0, merchant="Other user's transaction"),
-    ])
+    db.add_all(
+        [
+            make_transaction(user_a.id, days_ago=2, merchant="Older"),
+            make_transaction(user_a.id, days_ago=0, merchant="Newest"),
+            make_transaction(user_a.id, days_ago=1, merchant="Middle"),
+            make_transaction(
+                user_b.id, days_ago=0, merchant="Other user's transaction"
+            ),
+        ]
+    )
     db.commit()
     user_a_id = user_a.id
     db.close()
@@ -63,12 +70,17 @@ def test_list_transactions_pagination():
     db.add(user)
     db.flush()
     # days_ago=0 is newest, days_ago=4 is oldest; sorted desc: 0,1,2,3,4
-    db.add_all(make_transaction(user.id, days_ago=i, merchant=f"Merchant {i}") for i in range(5))
+    db.add_all(
+        make_transaction(user.id, days_ago=i, merchant=f"Merchant {i}")
+        for i in range(5)
+    )
     db.commit()
     user_id = user.id
     db.close()
 
-    response = client.get("/transactions", params={"user_id": user_id, "limit": 2, "offset": 1})
+    response = client.get(
+        "/transactions", params={"user_id": user_id, "limit": 2, "offset": 1}
+    )
     assert response.status_code == 200
     body = response.json()
 
@@ -97,7 +109,8 @@ def test_flagged_transaction_surfaces_rationale_and_is_flagged():
     # Same merchant throughout so new-merchant risk never gets a second
     # first-time purchase to fire on -- isolates this to amount deviation.
     history = [
-        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00")) for i in range(5)
+        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00"))
+        for i in range(5)
     ]
     outlier = make_transaction(user.id, days_ago=0, amount=Decimal("500.00"))
     db.add_all([*history, outlier])
@@ -155,7 +168,9 @@ def test_transaction_triggering_multiple_rules_concatenates_rationale():
     items_by_id = {item["id"]: item for item in response.json()["items"]}
 
     multi_hit_rationale = items_by_id[multi_hit_id]["rationale"]
-    assert "transactions" in multi_hit_rationale and "in 10 minutes" in multi_hit_rationale
+    assert (
+        "transactions" in multi_hit_rationale and "in 10 minutes" in multi_hit_rationale
+    )
     assert "higher than your typical spend" in multi_hit_rationale
     # RULES order (see engine.py), not hit-discovery order.
     assert items_by_id[multi_hit_id]["rule_names"] == ["velocity", "amount_deviation"]
@@ -185,7 +200,8 @@ def test_flags_are_persisted_to_the_database():
     db.add(user)
     db.flush()
     history = [
-        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00")) for i in range(5)
+        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00"))
+        for i in range(5)
     ]
     outlier = make_transaction(user.id, days_ago=0, amount=Decimal("500.00"))
     db.add_all([*history, outlier])
@@ -198,7 +214,11 @@ def test_flags_are_persisted_to_the_database():
     assert response.status_code == 200
 
     db = TestingSessionLocal()
-    flags = db.query(TransactionFlag).filter(TransactionFlag.transaction_id == outlier_id).all()
+    flags = (
+        db.query(TransactionFlag)
+        .filter(TransactionFlag.transaction_id == outlier_id)
+        .all()
+    )
     db.close()
 
     assert len(flags) == 1
@@ -211,7 +231,8 @@ def test_stale_flags_are_cleared_when_no_longer_triggered():
     db.add(user)
     db.flush()
     history = [
-        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00")) for i in range(5)
+        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00"))
+        for i in range(5)
     ]
     outlier = make_transaction(user.id, days_ago=0, amount=Decimal("500.00"))
     db.add_all([*history, outlier])
@@ -238,7 +259,11 @@ def test_stale_flags_are_cleared_when_no_longer_triggered():
     assert second_items_by_id[outlier_id]["rule_names"] == []
 
     db = TestingSessionLocal()
-    flags = db.query(TransactionFlag).filter(TransactionFlag.transaction_id == outlier_id).all()
+    flags = (
+        db.query(TransactionFlag)
+        .filter(TransactionFlag.transaction_id == outlier_id)
+        .all()
+    )
     db.close()
     assert flags == []
 
@@ -254,7 +279,8 @@ def test_concurrent_requests_dont_race_on_flag_refresh():
     db.add(user)
     db.flush()
     history = [
-        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00")) for i in range(5)
+        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00"))
+        for i in range(5)
     ]
     outlier = make_transaction(user.id, days_ago=0, amount=Decimal("500.00"))
     db.add_all([*history, outlier])
@@ -286,6 +312,10 @@ def test_concurrent_requests_dont_race_on_flag_refresh():
 def db_query_flags_for(transaction_id: int) -> list[TransactionFlag]:
     db = TestingSessionLocal()
     try:
-        return db.query(TransactionFlag).filter(TransactionFlag.transaction_id == transaction_id).all()
+        return (
+            db.query(TransactionFlag)
+            .filter(TransactionFlag.transaction_id == transaction_id)
+            .all()
+        )
     finally:
         db.close()

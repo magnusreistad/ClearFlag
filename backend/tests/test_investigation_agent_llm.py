@@ -37,7 +37,9 @@ def test_explicit_mock_mode_returns_labeled_canned_response():
 
 def test_mock_mode_accepts_injected_scripted_responses(monkeypatch):
     monkeypatch.setenv("INVESTIGATION_AGENT_LLM_MODE", "mock")
-    scripted = iter([AIMessage(content=f"{MOCK_RESPONSE_PREFIX} velocity fixture response")])
+    scripted = iter(
+        [AIMessage(content=f"{MOCK_RESPONSE_PREFIX} velocity fixture response")]
+    )
 
     model = get_chat_model(responses=scripted)
 

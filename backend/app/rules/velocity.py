@@ -53,7 +53,9 @@ def evaluate_velocity(
         if count_in_window > max_count:
             for i in range(start, end + 1):
                 tx_id = ordered[i].id
-                best_count_by_id[tx_id] = max(best_count_by_id.get(tx_id, 0), count_in_window)
+                best_count_by_id[tx_id] = max(
+                    best_count_by_id.get(tx_id, 0), count_in_window
+                )
 
     return [
         RuleHit(

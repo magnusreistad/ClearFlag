@@ -92,7 +92,9 @@ def _langsmith_env_cache_cleared():
     langsmith.utils.get_env_var.cache_clear()
 
 
-def test_enforce_no_tracing_in_ci_turns_off_langsmiths_own_tracing_check(monkeypatch, _langsmith_env_cache_cleared):
+def test_enforce_no_tracing_in_ci_turns_off_langsmiths_own_tracing_check(
+    monkeypatch, _langsmith_env_cache_cleared
+):
     """SCRUM-54 finding. enforce_no_tracing_in_ci() only rewrites os.environ,
     but langsmith reads tracing env vars through an lru_cache'd get_env_var
     -- and a graph run reads them at graph.invoke time, before
@@ -145,10 +147,24 @@ class _StubLangSmithClient:
 @pytest.fixture
 def trace_attempts(monkeypatch, _langsmith_env_cache_cleared):
     attempts = []
-    monkeypatch.setattr(langsmith.run_trees.RunTree, "post", lambda self, *a, **k: attempts.append("post"))
-    monkeypatch.setattr(langsmith.run_trees.RunTree, "patch", lambda self, *a, **k: attempts.append("patch"))
-    monkeypatch.setattr(langchain_core.tracers.langchain, "get_client", lambda: _StubLangSmithClient(attempts))
-    monkeypatch.setattr(langsmith, "Client", lambda *a, **k: _StubLangSmithClient(attempts))
+    monkeypatch.setattr(
+        langsmith.run_trees.RunTree,
+        "post",
+        lambda self, *a, **k: attempts.append("post"),
+    )
+    monkeypatch.setattr(
+        langsmith.run_trees.RunTree,
+        "patch",
+        lambda self, *a, **k: attempts.append("patch"),
+    )
+    monkeypatch.setattr(
+        langchain_core.tracers.langchain,
+        "get_client",
+        lambda: _StubLangSmithClient(attempts),
+    )
+    monkeypatch.setattr(
+        langsmith, "Client", lambda *a, **k: _StubLangSmithClient(attempts)
+    )
     return attempts
 
 
@@ -203,7 +219,10 @@ def test_ci_graph_run_attempts_no_trace_even_with_langsmiths_env_cache_warm(
     assert langsmith.utils.tracing_is_enabled() is False
 
 
-@pytest.mark.skipif(not hasattr(langsmith, "configure"), reason="langsmith.configure needs langsmith>=0.4.10")
+@pytest.mark.skipif(
+    not hasattr(langsmith, "configure"),
+    reason="langsmith.configure needs langsmith>=0.4.10",
+)
 def test_ci_graph_run_attempts_no_trace_when_langsmith_is_switched_on_in_process(
     monkeypatch, scripted_llm, trace_attempts
 ):
@@ -224,7 +243,9 @@ def test_ci_graph_run_attempts_no_trace_when_langsmith_is_switched_on_in_process
     assert trace_attempts == []
 
 
-def test_dev_tracing_still_traces_a_graph_run(monkeypatch, scripted_llm, trace_attempts):
+def test_dev_tracing_still_traces_a_graph_run(
+    monkeypatch, scripted_llm, trace_attempts
+):
     """CI unset, tracing on: the run is traced exactly as before SCRUM-75."""
     import langsmith.utils
 

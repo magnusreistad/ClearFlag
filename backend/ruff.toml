@@ -1,2 +1,5 @@
+# Matches the Python version CI runs (.github/workflows/ci.yml).
+target-version = "py312"
+
 [lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]

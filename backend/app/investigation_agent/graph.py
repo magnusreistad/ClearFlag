@@ -96,7 +96,11 @@ def _tool_session():
     db = SessionLocal()
     try:
         if db.bind.dialect.name == "postgresql":
-            timeout_ms = int(os.getenv("INVESTIGATION_AGENT_TOOL_DB_TIMEOUT_MS", DEFAULT_TOOL_DB_TIMEOUT_MS))
+            timeout_ms = int(
+                os.getenv(
+                    "INVESTIGATION_AGENT_TOOL_DB_TIMEOUT_MS", DEFAULT_TOOL_DB_TIMEOUT_MS
+                )
+            )
             db.execute(text(f"SET LOCAL statement_timeout = {timeout_ms}"))
         yield db
     finally:
@@ -134,6 +138,7 @@ def _parse_tool_error(content: str) -> tuple[str, str]:
         message = message[1:-1]
     return exc_class, message
 
+
 # SCRUM-51: which tool each rule's evidence comes from -- the single source
 # of truth both plan_tool_calls (which tool_calls to build) and
 # collect_evidence (comment below) rely on. amount_deviation has no entry:
@@ -154,7 +159,9 @@ def route_entry(state: InvestigationState) -> dict:
 
 @tool(response_format="content_and_artifact")
 def get_transaction_history(
-    user_id: int, anchor_timestamp: datetime, window_minutes: int = DEFAULT_WINDOW_MINUTES
+    user_id: int,
+    anchor_timestamp: datetime,
+    window_minutes: int = DEFAULT_WINDOW_MINUTES,
 ) -> tuple[str, dict]:
     """SCRUM-48. Triggered by the velocity rule.
 
@@ -192,18 +199,26 @@ def get_transaction_history(
             .all()
         )
 
-    transactions = [{"timestamp": row.timestamp, "amount": row.amount, "merchant": row.merchant} for row in rows]
+    transactions = [
+        {"timestamp": row.timestamp, "amount": row.amount, "merchant": row.merchant}
+        for row in rows
+    ]
 
     evidence = {
         "user_id": user_id,
         "transactions": transactions,
         "count": len(transactions),
     }
-    return f"Found {len(transactions)} transaction(s) in the {window_minutes}-minute window.", evidence
+    return (
+        f"Found {len(transactions)} transaction(s) in the {window_minutes}-minute window.",
+        evidence,
+    )
 
 
 @tool(response_format="content_and_artifact")
-def get_merchant_risk_score(user_id: int, merchant: str, anchor_timestamp: datetime) -> tuple[str, dict]:
+def get_merchant_risk_score(
+    user_id: int, merchant: str, anchor_timestamp: datetime
+) -> tuple[str, dict]:
     """SCRUM-49. Triggered by the new_merchant_risk rule.
 
     Keys merchant identity off the `merchant` name string, not a merchant_id:
@@ -249,7 +264,11 @@ def get_merchant_risk_score(user_id: int, merchant: str, anchor_timestamp: datet
         "prior_transaction_count": prior_transaction_count,
         "risk_tier": None,
     }
-    label = "first" if prior_transaction_count == 0 else f"not first ({prior_transaction_count} prior)"
+    label = (
+        "first"
+        if prior_transaction_count == 0
+        else f"not first ({prior_transaction_count} prior)"
+    )
     return f"{merchant}: {label} transaction for this user.", evidence
 
 
@@ -266,7 +285,9 @@ def _most_common_location_label(history: list[Transaction]) -> str:
 
 
 @tool(response_format="content_and_artifact")
-def get_geo_distance(user_id: int, latitude: float, longitude: float, anchor_timestamp: datetime) -> tuple[str, dict]:
+def get_geo_distance(
+    user_id: int, latitude: float, longitude: float, anchor_timestamp: datetime
+) -> tuple[str, dict]:
     """SCRUM-50. Triggered by the geographic_anomaly rule.
 
     Mirrors app.rules.geographic_anomaly's own math instead of reinventing
@@ -321,7 +342,9 @@ def get_geo_distance(user_id: int, latitude: float, longitude: float, anchor_tim
 
     if len(history) >= MIN_HISTORY_COUNT:
         centroid_lat, centroid_lon = _centroid(history)
-        distance_miles = _haversine_miles(centroid_lat, centroid_lon, latitude, longitude)
+        distance_miles = _haversine_miles(
+            centroid_lat, centroid_lon, latitude, longitude
+        )
         distance_km = distance_miles * KM_PER_MILE
         typical_location_label = _most_common_location_label(history)
 
@@ -503,7 +526,9 @@ def compose_rationale(state: InvestigationState) -> dict:
             "composition_error_label": "; ".join(labels),
         }
 
-    payload = build_payload(transaction, state["rule_names"], state.get("rule_values", {}))
+    payload = build_payload(
+        transaction, state["rule_names"], state.get("rule_values", {})
+    )
     evidence = state.get("evidence", {})
     derived = compute_derived_facts(payload)
 
@@ -522,10 +547,15 @@ def compose_rationale(state: InvestigationState) -> dict:
         # returns a plain string unchanged when content already was one.
         content = response.text
     except Exception as exc:
-        logger.exception("Investigation Agent model call failed for transaction %s", transaction["id"])
+        logger.exception(
+            "Investigation Agent model call failed for transaction %s",
+            transaction["id"],
+        )
         status_code = getattr(exc, "status_code", None)
         status_display = status_code if status_code is not None else "-"
-        composition_error = f"ModelError: {type(exc).__name__}({status_display}): {_truncate(str(exc))}"
+        composition_error = (
+            f"ModelError: {type(exc).__name__}({status_display}): {_truncate(str(exc))}"
+        )
         return {
             "rationale": "",
             "composed_rationale": "",
@@ -577,7 +607,9 @@ def validate(state: InvestigationState) -> dict:
         return {"rationale": "", "rationale_source": "interim", "violations": []}
 
     transaction = state["transaction"]
-    payload = build_payload(transaction, state["rule_names"], state.get("rule_values", {}))
+    payload = build_payload(
+        transaction, state["rule_names"], state.get("rule_values", {})
+    )
     evidence = state.get("evidence", {})
     rationale = state.get("rationale", "")
 
@@ -585,7 +617,11 @@ def validate(state: InvestigationState) -> dict:
 
     if result.passed:
         return {"rationale": rationale, "rationale_source": "agent", "violations": []}
-    return {"rationale": "", "rationale_source": "interim", "violations": result.violations}
+    return {
+        "rationale": "",
+        "rationale_source": "interim",
+        "violations": result.violations,
+    }
 
 
 def build_graph() -> StateGraph:

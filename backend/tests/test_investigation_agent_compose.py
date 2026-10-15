@@ -98,7 +98,9 @@ def _compose_then_validate(state: InvestigationState) -> InvestigationState:
 
 
 class TestGroundedRationalePasses:
-    def test_scripted_grounded_meridian_rationale_passes_with_agent_source(self, scripted_llm):
+    def test_scripted_grounded_meridian_rationale_passes_with_agent_source(
+        self, scripted_llm
+    ):
         scripted = (
             "This transaction was flagged for three reasons. It's your first purchase from "
             "Meridian Duty-Free Traders. The $3,200 amount is 1,873% higher than your typical "
@@ -129,7 +131,9 @@ class TestUngroundedRationaleFails:
 
         assert result["rationale"] == ""
         assert result["rationale_source"] == "interim"
-        assert any(v.violation_type == "ungrounded_number" for v in result["violations"])
+        assert any(
+            v.violation_type == "ungrounded_number" for v in result["violations"]
+        )
         # SCRUM-53 follow-up: composed_rationale is compose_rationale's own
         # audit record and validate() never touches it -- unlike `rationale`
         # above, it must still hold the actual (ungrounded) model output
@@ -155,7 +159,10 @@ class TestUngroundedRationaleFails:
 
         assert result["rationale"] == ""
         assert result["rationale_source"] == "interim"
-        assert any(v.violation_type == "unsupported_entity" and v.span == "Tokyo" for v in result["violations"])
+        assert any(
+            v.violation_type == "unsupported_entity" and v.span == "Tokyo"
+            for v in result["violations"]
+        )
 
 
 class TestBlockContentResponses:
@@ -169,7 +176,11 @@ class TestBlockContentResponses:
 
     def test_extracts_only_the_text_block_ignoring_a_thinking_block(self, scripted_llm):
         block_content = [
-            {"type": "thinking", "thinking": "internal reasoning", "signature": "abc123"},
+            {
+                "type": "thinking",
+                "thinking": "internal reasoning",
+                "signature": "abc123",
+            },
             {
                 "type": "text",
                 "text": (
@@ -191,7 +202,9 @@ class TestBlockContentResponses:
 
 
 class TestModelFailure:
-    def test_model_raising_records_composition_error_and_produces_no_rationale(self, scripted_llm):
+    def test_model_raising_records_composition_error_and_produces_no_rationale(
+        self, scripted_llm
+    ):
         scripted_llm(TimeoutError("simulated model timeout"))
 
         result = _compose_then_validate(_meridian_state())
@@ -200,7 +213,10 @@ class TestModelFailure:
         assert result["rationale_source"] == "interim"
         # SCRUM-56: "ModelError: <ExceptionClass>(<status_code or ->): <message>" --
         # TimeoutError carries no status_code, so getattr(exc, "status_code", None) is None.
-        assert result["composition_error"] == "ModelError: TimeoutError(-): simulated model timeout"
+        assert (
+            result["composition_error"]
+            == "ModelError: TimeoutError(-): simulated model timeout"
+        )
         assert result["composition_error_label"] == "ModelError:TimeoutError(-)"
         # SCRUM-56: validate() skips its grounding checks on a composition_error --
         # an empty `rationale` here is a structural consequence of the model call
@@ -244,7 +260,10 @@ class TestModelFailure:
 
         assert result["rationale"] == ""
         assert result["rationale_source"] == "interim"
-        assert result["composition_error"] == "ModelError: TimeoutError(-): simulated model timeout"
+        assert (
+            result["composition_error"]
+            == "ModelError: TimeoutError(-): simulated model timeout"
+        )
         assert result["violations"] == []
 
     def test_model_raising_with_a_status_code_records_it(self, scripted_llm):
@@ -262,7 +281,10 @@ class TestModelFailure:
 
         result = _compose_then_validate(_meridian_state())
 
-        assert result["composition_error"] == "ModelError: _StatusCodedError(500): credential validation failed"
+        assert (
+            result["composition_error"]
+            == "ModelError: _StatusCodedError(500): credential validation failed"
+        )
         assert result["composition_error_label"] == "ModelError:_StatusCodedError(500)"
         assert result["violations"] == []
 
@@ -278,7 +300,9 @@ class TestModelFailure:
 
         result = _compose_then_validate(_meridian_state())
 
-        assert result["composition_error"].startswith("ModelError: APITimeoutError(-): ")
+        assert result["composition_error"].startswith(
+            "ModelError: APITimeoutError(-): "
+        )
         assert result["composition_error_label"] == "ModelError:APITimeoutError(-)"
         assert result["violations"] == []
 
@@ -290,7 +314,9 @@ class TestModelFailure:
         result = _compose_then_validate(_meridian_state())
 
         assert len(result["composition_error"]) < len(long_message)
-        assert result["composition_error"].startswith("ModelError: RuntimeError(-): " + "x" * 20)
+        assert result["composition_error"].startswith(
+            "ModelError: RuntimeError(-): " + "x" * 20
+        )
 
 
 class TestToolErrorAbortsComposition:
@@ -299,7 +325,9 @@ class TestToolErrorAbortsComposition:
     SCRUM-51's original "citing a failed tool's facts still fails
     validation" behavior (which required a model call to happen first)."""
 
-    def test_tool_error_means_no_model_call_and_a_tool_error_composition_error(self, scripted_llm):
+    def test_tool_error_means_no_model_call_and_a_tool_error_composition_error(
+        self, scripted_llm
+    ):
         # Nothing scripted: scripted_llm fails the test on any model call.
         llm = scripted_llm()
 
@@ -322,7 +350,10 @@ class TestToolErrorAbortsComposition:
         assert result["composition_error"] == (
             "ToolError[get_geo_distance]: RuntimeError: simulated get_geo_distance failure"
         )
-        assert result["composition_error_label"] == "ToolError[get_geo_distance]:RuntimeError"
+        assert (
+            result["composition_error_label"]
+            == "ToolError[get_geo_distance]:RuntimeError"
+        )
         assert llm.invocations == 0
 
     def test_multiple_tool_errors_are_all_named(self, scripted_llm):
@@ -339,14 +370,22 @@ class TestToolErrorAbortsComposition:
 
         result = _compose_then_validate(state)
 
-        assert "ToolError[get_geo_distance]: RuntimeError: boom" in result["composition_error"]
-        assert "ToolError[get_merchant_risk_score]: ValueError: also boom" in result["composition_error"]
+        assert (
+            "ToolError[get_geo_distance]: RuntimeError: boom"
+            in result["composition_error"]
+        )
+        assert (
+            "ToolError[get_merchant_risk_score]: ValueError: also boom"
+            in result["composition_error"]
+        )
         assert result["violations"] == []
         assert llm.invocations == 0
 
 
 class TestNoToolCompositionStillRuns:
-    def test_amount_deviation_only_flag_still_composes_and_validates(self, scripted_llm):
+    def test_amount_deviation_only_flag_still_composes_and_validates(
+        self, scripted_llm
+    ):
         """No tool call is planned for an amount_deviation-only flag (SCRUM-51), but
         composition must still run on the no-tool path -- this exercises collect_evidence ->
         compose_rationale -> validate through the real compiled graph (not called directly),
@@ -454,7 +493,9 @@ class TestCollectEvidenceUnchangedMapping:
 
         result = collect_evidence(state)
 
-        assert result["evidence"] == {"get_merchant_risk_score": {"is_first_transaction": True}}
+        assert result["evidence"] == {
+            "get_merchant_risk_score": {"is_first_transaction": True}
+        }
         assert result["tool_errors"] == {"get_geo_distance": "simulated failure"}
 
     def test_no_tool_messages_at_all_returns_empty_dicts(self):

@@ -74,7 +74,10 @@ def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    )
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return EARTH_RADIUS_MILES * c
 
@@ -89,7 +92,9 @@ def _centroid(transactions: Sequence[Transaction]) -> tuple[float, float]:
     figure this rule flags on, without a second implementation that could
     drift from this one.
     """
-    return mean(t.latitude for t in transactions), mean(t.longitude for t in transactions)
+    return mean(t.latitude for t in transactions), mean(
+        t.longitude for t in transactions
+    )
 
 
 def evaluate_geographic_anomaly(
@@ -130,9 +135,12 @@ def evaluate_geographic_anomaly(
         centroid_lat, centroid_lon = _centroid(history)
 
         historical_distances = [
-            _haversine_miles(centroid_lat, centroid_lon, h.latitude, h.longitude) for h in history
+            _haversine_miles(centroid_lat, centroid_lon, h.latitude, h.longitude)
+            for h in history
         ]
-        current_distance = _haversine_miles(centroid_lat, centroid_lon, t.latitude, t.longitude)
+        current_distance = _haversine_miles(
+            centroid_lat, centroid_lon, t.latitude, t.longitude
+        )
 
         historical_mean = mean(historical_distances)
         if current_distance <= historical_mean:

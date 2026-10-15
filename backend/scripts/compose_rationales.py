@@ -163,8 +163,12 @@ def _collect_pending(
         fingerprint_pairs = list(fingerprint_by_id.items())
 
         already_passing = set(
-            db.query(AgentRationale.transaction_id, AgentRationale.fact_fingerprint).filter(
-                tuple_(AgentRationale.transaction_id, AgentRationale.fact_fingerprint).in_(fingerprint_pairs),
+            db.query(
+                AgentRationale.transaction_id, AgentRationale.fact_fingerprint
+            ).filter(
+                tuple_(
+                    AgentRationale.transaction_id, AgentRationale.fact_fingerprint
+                ).in_(fingerprint_pairs),
                 AgentRationale.prompt_version == PROMPT_VERSION,
                 AgentRationale.validation_passed.is_(True),
             )
@@ -173,7 +177,9 @@ def _collect_pending(
         attempts_used_by_id = dict(
             db.query(AgentRationale.transaction_id, func.count(AgentRationale.id))
             .filter(
-                tuple_(AgentRationale.transaction_id, AgentRationale.fact_fingerprint).in_(fingerprint_pairs),
+                tuple_(
+                    AgentRationale.transaction_id, AgentRationale.fact_fingerprint
+                ).in_(fingerprint_pairs),
                 AgentRationale.prompt_version == PROMPT_VERSION,
                 AgentRationale.validator_version == VALIDATOR_VERSION,
                 AgentRationale.validation_passed.is_(False),
@@ -187,12 +193,16 @@ def _collect_pending(
             fingerprint = fingerprint_by_id[transaction_id]
 
             if (transaction_id, fingerprint) in already_passing:
-                skipped_already_passing.append(SkippedAlreadyPassing(transaction_id, fingerprint))
+                skipped_already_passing.append(
+                    SkippedAlreadyPassing(transaction_id, fingerprint)
+                )
                 continue
 
             attempts_used = attempts_used_by_id.get(transaction_id, 0)
             if attempts_used >= MAX_VALIDATION_ATTEMPTS:
-                skipped_capped.append(SkippedCapped(transaction_id, fingerprint, attempts_used))
+                skipped_capped.append(
+                    SkippedCapped(transaction_id, fingerprint, attempts_used)
+                )
                 continue
 
             pending.append(
@@ -268,26 +278,49 @@ def _outcome_for_row(row: AgentRationale) -> str:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
+    )
 
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--user-id", type=int, default=None, help="scope composition to this user only")
-    parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help=f"max transactions to compose (default {DEFAULT_LIMIT})")
-    parser.add_argument("--dry-run", action="store_true", help="list what would be composed, without calling the model")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--user-id", type=int, default=None, help="scope composition to this user only"
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_LIMIT,
+        help=f"max transactions to compose (default {DEFAULT_LIMIT})",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list what would be composed, without calling the model",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
     try:
-        full_pending, skipped_already_passing, skipped_capped = _collect_pending(db, args.user_id)
+        full_pending, skipped_already_passing, skipped_capped = _collect_pending(
+            db, args.user_id
+        )
         pending = full_pending[: args.limit]
 
         if args.dry_run:
             skipped = len(skipped_already_passing) + len(skipped_capped)
-            print(f"{len(pending)} transaction(s) would be composed (dry run, no model calls):")
+            print(
+                f"{len(pending)} transaction(s) would be composed (dry run, no model calls):"
+            )
             for p in pending:
-                print(f"  transaction {p.transaction.id}: rules={p.rule_names} fingerprint={p.fingerprint[:12]}...")
+                print(
+                    f"  transaction {p.transaction.id}: rules={p.rule_names} fingerprint={p.fingerprint[:12]}..."
+                )
             for s in skipped_capped:
-                print(f"  transaction {s.transaction_id}: SKIPPED (capped at {MAX_VALIDATION_ATTEMPTS} validation failures)")
+                print(
+                    f"  transaction {s.transaction_id}: SKIPPED (capped at {MAX_VALIDATION_ATTEMPTS} validation failures)"
+                )
             print(f"composed=0 passed=0 failed=0 skipped={skipped} (dry run)")
             return
 
@@ -329,7 +362,9 @@ def main() -> None:
             else:
                 attempt_display = f"{p.attempts_used + 1}/{MAX_VALIDATION_ATTEMPTS}"
                 if outcome == OUTCOME_VALIDATION_FAILED:
-                    violation_types = ",".join(v["violation_type"] for v in row.violations)
+                    violation_types = ",".join(
+                        v["violation_type"] for v in row.violations
+                    )
                     detail = f"violation_types={violation_types}"
                 else:
                     detail = ""
@@ -343,7 +378,9 @@ def main() -> None:
                 detail,
             )
 
-        summary = " ".join(f"{outcome}={outcome_counts.get(outcome, 0)}" for outcome in _OUTCOME_ORDER)
+        summary = " ".join(
+            f"{outcome}={outcome_counts.get(outcome, 0)}" for outcome in _OUTCOME_ORDER
+        )
         logger.info("run complete: %s", summary)
 
         if outcome_counts.get(OUTCOME_COMPOSITION_ERROR, 0) > 0:

@@ -73,7 +73,9 @@ def _json_default(value: Any) -> str:
     return str(value)
 
 
-def build_prompt(payload: dict[str, Any], evidence: dict[str, Any], derived: dict[str, Any]) -> str:
+def build_prompt(
+    payload: dict[str, Any], evidence: dict[str, Any], derived: dict[str, Any]
+) -> str:
     """Assembles the model-facing prompt from the same citable facts
     validate_rationale checks against: payload's transaction/rules, evidence
     (InvestigationState["evidence"]), and derived (compute_derived_facts's
@@ -88,4 +90,6 @@ def build_prompt(payload: dict[str, Any], evidence: dict[str, Any], derived: dic
     }
     facts_json = json.dumps(facts, indent=2, default=_json_default, sort_keys=True)
     rule_names = ", ".join(payload.get("rule_names", []))
-    return SYSTEM_PROMPT.format(max_chars=MAX_RATIONALE_CHARS, facts_json=facts_json, rule_names=rule_names)
+    return SYSTEM_PROMPT.format(
+        max_chars=MAX_RATIONALE_CHARS, facts_json=facts_json, rule_names=rule_names
+    )

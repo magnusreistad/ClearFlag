@@ -69,7 +69,9 @@ def test_scrum_65_triple_rule_transaction_fans_out_to_its_two_mapped_tool_branch
     visit exactly get_merchant_risk_score and get_geo_distance.
     """
     start_date = datetime(2026, 1, 1, tzinfo=UTC)
-    [(seed_transaction, _)] = generate_triple_rule_fraud(user_id=1, start_date=start_date)
+    [(seed_transaction, _)] = generate_triple_rule_fraud(
+        user_id=1, start_date=start_date
+    )
 
     state: InvestigationState = {
         "transaction": _transaction_data(seed_transaction, id_=999, user_id=1),
@@ -80,9 +82,17 @@ def test_scrum_65_triple_rule_transaction_fans_out_to_its_two_mapped_tool_branch
 
     result = investigation_graph.invoke(state)
 
-    assert set(result["evidence"].keys()) == {"get_merchant_risk_score", "get_geo_distance"}
-    assert result["evidence"]["get_merchant_risk_score"]["merchant"] == "Meridian Duty-Free Traders"
-    assert result["evidence"]["get_geo_distance"]["latitude"] == seed_transaction.latitude
+    assert set(result["evidence"].keys()) == {
+        "get_merchant_risk_score",
+        "get_geo_distance",
+    }
+    assert (
+        result["evidence"]["get_merchant_risk_score"]["merchant"]
+        == "Meridian Duty-Free Traders"
+    )
+    assert (
+        result["evidence"]["get_geo_distance"]["latitude"] == seed_transaction.latitude
+    )
     assert result["tool_errors"] == {}
     # compose_rationale/validate (SCRUM-53) still run for every path, including this one -- but
     # this state has no rule_values, so get_chat_model()'s default mock response (which cites
@@ -183,7 +193,11 @@ class TestPlanToolCalls:
                 "longitude": 120.9842,
                 "location_label": "Manila, Philippines",
             },
-            "rule_names": ["new_merchant_risk", "amount_deviation", "geographic_anomaly"],
+            "rule_names": [
+                "new_merchant_risk",
+                "amount_deviation",
+                "geographic_anomaly",
+            ],
             "evidence": {},
             "rationale": "",
         }
@@ -233,7 +247,9 @@ def test_tool_exception_is_isolated_and_recorded_in_tool_errors(monkeypatch):
     parallel tool failures/successes are isolated from each other.
     """
     start_date = datetime(2026, 1, 1, tzinfo=UTC)
-    [(seed_transaction, _)] = generate_triple_rule_fraud(user_id=1, start_date=start_date)
+    [(seed_transaction, _)] = generate_triple_rule_fraud(
+        user_id=1, start_date=start_date
+    )
 
     def _raise(*args, **kwargs):
         raise RuntimeError("simulated get_geo_distance failure")
@@ -250,10 +266,16 @@ def test_tool_exception_is_isolated_and_recorded_in_tool_errors(monkeypatch):
     result = investigation_graph.invoke(state)
 
     assert set(result["evidence"].keys()) == {"get_merchant_risk_score"}
-    assert result["evidence"]["get_merchant_risk_score"]["merchant"] == "Meridian Duty-Free Traders"
+    assert (
+        result["evidence"]["get_merchant_risk_score"]["merchant"]
+        == "Meridian Duty-Free Traders"
+    )
     assert "get_geo_distance" not in result["evidence"]
     assert "get_geo_distance" in result["tool_errors"]
-    assert "simulated get_geo_distance failure" in result["tool_errors"]["get_geo_distance"]
+    assert (
+        "simulated get_geo_distance failure"
+        in result["tool_errors"]["get_geo_distance"]
+    )
 
 
 class TestGetTransactionHistory:
@@ -264,11 +286,15 @@ class TestGetTransactionHistory:
     tool gets called for a velocity-only flag.
     """
 
-    def _seed_user_and_anchor(self, db, *, anchor: datetime) -> tuple[User, Transaction]:
+    def _seed_user_and_anchor(
+        self, db, *, anchor: datetime
+    ) -> tuple[User, Transaction]:
         user = User(name="Test User")
         db.add(user)
         db.flush()
-        anchor_transaction = _make_transaction(user.id, anchor, merchant="Anchor Merchant", amount=Decimal("25.00"))
+        anchor_transaction = _make_transaction(
+            user.id, anchor, merchant="Anchor Merchant", amount=Decimal("25.00")
+        )
         db.add(anchor_transaction)
         db.flush()
         return user, anchor_transaction
@@ -280,17 +306,25 @@ class TestGetTransactionHistory:
             user, _ = self._seed_user_and_anchor(db, anchor=anchor)
             # 4 minutes before the anchor, inside the 10-minute window.
             inside = _make_transaction(
-                user.id, anchor - timedelta(minutes=4), merchant="Corner Store", amount=Decimal("5.00")
+                user.id,
+                anchor - timedelta(minutes=4),
+                merchant="Corner Store",
+                amount=Decimal("5.00"),
             )
             # Exactly at the window boundary (diff == window_minutes) -- velocity.py's
             # own `> window` exclusion test keeps this one in, so this tool should too.
             boundary = _make_transaction(
-                user.id, anchor - timedelta(minutes=10), merchant="Boundary Shop", amount=Decimal("7.50")
+                user.id,
+                anchor - timedelta(minutes=10),
+                merchant="Boundary Shop",
+                amount=Decimal("7.50"),
             )
             db.add_all([inside, boundary])
             db.commit()
 
-            _content, evidence = get_transaction_history.func(user_id=user.id, anchor_timestamp=anchor)
+            _content, evidence = get_transaction_history.func(
+                user_id=user.id, anchor_timestamp=anchor
+            )
         finally:
             db.close()
 
@@ -306,16 +340,24 @@ class TestGetTransactionHistory:
             user, _ = self._seed_user_and_anchor(db, anchor=anchor)
             # 11 minutes before the anchor -- just outside the 10-minute window.
             outside = _make_transaction(
-                user.id, anchor - timedelta(minutes=11), merchant="Too Early Shop", amount=Decimal("15.00")
+                user.id,
+                anchor - timedelta(minutes=11),
+                merchant="Too Early Shop",
+                amount=Decimal("15.00"),
             )
             # After the anchor -- the window only looks backward from it.
             after = _make_transaction(
-                user.id, anchor + timedelta(minutes=1), merchant="Too Late Shop", amount=Decimal("12.00")
+                user.id,
+                anchor + timedelta(minutes=1),
+                merchant="Too Late Shop",
+                amount=Decimal("12.00"),
             )
             db.add_all([outside, after])
             db.commit()
 
-            _content, evidence = get_transaction_history.func(user_id=user.id, anchor_timestamp=anchor)
+            _content, evidence = get_transaction_history.func(
+                user_id=user.id, anchor_timestamp=anchor
+            )
         finally:
             db.close()
 
@@ -330,10 +372,16 @@ class TestGetTransactionHistory:
             db.add(other_user)
             db.flush()
             # Belongs to a different user -- must not leak into this user's history.
-            db.add(_make_transaction(other_user.id, anchor, merchant="Someone Else's Purchase"))
+            db.add(
+                _make_transaction(
+                    other_user.id, anchor, merchant="Someone Else's Purchase"
+                )
+            )
             db.commit()
 
-            _content, evidence = get_transaction_history.func(user_id=999, anchor_timestamp=anchor)
+            _content, evidence = get_transaction_history.func(
+                user_id=999, anchor_timestamp=anchor
+            )
         finally:
             db.close()
 
@@ -360,7 +408,10 @@ class TestGetMerchantRiskScore:
             db.add(user)
             db.flush()
             other_merchant_history = _make_transaction(
-                user.id, anchor - timedelta(days=1), merchant="Corner Store", amount=Decimal("5.00")
+                user.id,
+                anchor - timedelta(days=1),
+                merchant="Corner Store",
+                amount=Decimal("5.00"),
             )
             db.add(other_merchant_history)
             db.commit()
@@ -383,10 +434,16 @@ class TestGetMerchantRiskScore:
             db.add(user)
             db.flush()
             first_purchase = _make_transaction(
-                user.id, anchor - timedelta(days=2), merchant="Regular Cafe", amount=Decimal("6.00")
+                user.id,
+                anchor - timedelta(days=2),
+                merchant="Regular Cafe",
+                amount=Decimal("6.00"),
             )
             second_purchase = _make_transaction(
-                user.id, anchor - timedelta(days=1), merchant="Regular Cafe", amount=Decimal("6.50")
+                user.id,
+                anchor - timedelta(days=1),
+                merchant="Regular Cafe",
+                amount=Decimal("6.50"),
             )
             db.add_all([first_purchase, second_purchase])
             db.commit()
@@ -424,12 +481,16 @@ class TestGetGeoDistance:
     flag).
     """
 
-    def _seed_user_and_history(self, db, *, anchor: datetime, count: int, **location_kwargs) -> tuple[User, list]:
+    def _seed_user_and_history(
+        self, db, *, anchor: datetime, count: int, **location_kwargs
+    ) -> tuple[User, list]:
         user = User(name="Test User")
         db.add(user)
         db.flush()
         history = [
-            _make_transaction(user.id, anchor - timedelta(days=count - i), **location_kwargs)
+            _make_transaction(
+                user.id, anchor - timedelta(days=count - i), **location_kwargs
+            )
             for i in range(count)
         ]
         db.add_all(history)
@@ -449,11 +510,15 @@ class TestGetGeoDistance:
         two can't silently disagree about what "anomalous" means here.
         """
         start_date = datetime(2026, 1, 1, tzinfo=UTC)
-        [(seed_transaction, _)] = generate_triple_rule_fraud(user_id=1, start_date=start_date)
+        [(seed_transaction, _)] = generate_triple_rule_fraud(
+            user_id=1, start_date=start_date
+        )
 
         db = TestingSessionLocal()
         try:
-            user, history = self._seed_user_and_history(db, anchor=seed_transaction.timestamp, count=5)
+            user, history = self._seed_user_and_history(
+                db, anchor=seed_transaction.timestamp, count=5
+            )
 
             _content, evidence = get_geo_distance.func(
                 user_id=user.id,
@@ -464,7 +529,10 @@ class TestGetGeoDistance:
 
             expected_lat, expected_lon = _centroid(history)
             expected_miles = _haversine_miles(
-                expected_lat, expected_lon, seed_transaction.latitude, seed_transaction.longitude
+                expected_lat,
+                expected_lon,
+                seed_transaction.latitude,
+                seed_transaction.longitude,
             )
             rule_hits = evaluate_geographic_anomaly([*history, seed_transaction])
         finally:
@@ -483,13 +551,18 @@ class TestGetGeoDistance:
             user, _ = self._seed_user_and_history(db, anchor=anchor, count=5)
 
             _content, evidence = get_geo_distance.func(
-                user_id=user.id, latitude=14.5995, longitude=120.9842, anchor_timestamp=anchor
+                user_id=user.id,
+                latitude=14.5995,
+                longitude=120.9842,
+                anchor_timestamp=anchor,
             )
         finally:
             db.close()
 
         assert evidence["distance_miles"] is not None
-        assert evidence["distance_km"] == pytest.approx(evidence["distance_miles"] * KM_PER_MILE)
+        assert evidence["distance_km"] == pytest.approx(
+            evidence["distance_miles"] * KM_PER_MILE
+        )
 
     def test_insufficient_history_returns_none_with_no_fabricated_values(self):
         """One short of MIN_HISTORY_COUNT (5) -- the same floor the rule
@@ -502,7 +575,10 @@ class TestGetGeoDistance:
             user, _ = self._seed_user_and_history(db, anchor=anchor, count=4)
 
             _content, evidence = get_geo_distance.func(
-                user_id=user.id, latitude=14.5995, longitude=120.9842, anchor_timestamp=anchor
+                user_id=user.id,
+                latitude=14.5995,
+                longitude=120.9842,
+                anchor_timestamp=anchor,
             )
         finally:
             db.close()
@@ -530,16 +606,29 @@ class TestGetGeoDistance:
             user = User(name="Test User")
             db.add(user)
             db.flush()
-            labels = ["Seattle, WA", "Seattle, WA", "Seattle, WA", "Portland, OR", "Portland, OR"]
+            labels = [
+                "Seattle, WA",
+                "Seattle, WA",
+                "Seattle, WA",
+                "Portland, OR",
+                "Portland, OR",
+            ]
             history = [
-                _make_transaction(user.id, anchor - timedelta(days=len(labels) - i), location_label=label)
+                _make_transaction(
+                    user.id,
+                    anchor - timedelta(days=len(labels) - i),
+                    location_label=label,
+                )
                 for i, label in enumerate(labels)
             ]
             db.add_all(history)
             db.commit()
 
             _content, evidence = get_geo_distance.func(
-                user_id=user.id, latitude=14.5995, longitude=120.9842, anchor_timestamp=anchor
+                user_id=user.id,
+                latitude=14.5995,
+                longitude=120.9842,
+                anchor_timestamp=anchor,
             )
         finally:
             db.close()
@@ -557,16 +646,29 @@ class TestGetGeoDistance:
             user = User(name="Test User")
             db.add(user)
             db.flush()
-            labels = ["Bellevue, WA", "Bellevue, WA", "Seattle, WA", "Seattle, WA", "Portland, OR"]
+            labels = [
+                "Bellevue, WA",
+                "Bellevue, WA",
+                "Seattle, WA",
+                "Seattle, WA",
+                "Portland, OR",
+            ]
             history = [
-                _make_transaction(user.id, anchor - timedelta(days=len(labels) - i), location_label=label)
+                _make_transaction(
+                    user.id,
+                    anchor - timedelta(days=len(labels) - i),
+                    location_label=label,
+                )
                 for i, label in enumerate(labels)
             ]
             db.add_all(history)
             db.commit()
 
             _content, evidence = get_geo_distance.func(
-                user_id=user.id, latitude=14.5995, longitude=120.9842, anchor_timestamp=anchor
+                user_id=user.id,
+                latitude=14.5995,
+                longitude=120.9842,
+                anchor_timestamp=anchor,
             )
         finally:
             db.close()

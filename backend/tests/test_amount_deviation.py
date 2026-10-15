@@ -12,7 +12,9 @@ from app.rules.amount_deviation import evaluate_amount_deviation
 # objects straight to evaluate_amount_deviation() after the session closes,
 # so their attributes must stay readable without a live session to refresh
 # from.
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
+TestingSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
+)
 
 
 BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
@@ -53,7 +55,9 @@ def create_transactions(
     """One transaction per amount, spaced a day apart in list order (so
     creation order is also timestamp order)."""
     txns = [
-        make_transaction(user_id, BASE_TIME + timedelta(days=i), amount, category=category)
+        make_transaction(
+            user_id, BASE_TIME + timedelta(days=i), amount, category=category
+        )
         for i, amount in enumerate(amounts)
     ]
     db.add_all(txns)
@@ -61,7 +65,13 @@ def create_transactions(
     return txns
 
 
-HISTORY = [Decimal("60.00"), Decimal("55.00"), Decimal("70.00"), Decimal("65.00"), Decimal("58.00")]
+HISTORY = [
+    Decimal("60.00"),
+    Decimal("55.00"),
+    Decimal("70.00"),
+    Decimal("65.00"),
+    Decimal("58.00"),
+]
 # mean=61.60, sample stdev=~5.94 -- anything above 61.60 + 3*5.94 = ~79.42
 # clears the default threshold.
 
@@ -165,7 +175,9 @@ def test_unusually_low_amount_does_not_flag():
 def test_categories_are_evaluated_independently():
     db = TestingSessionLocal()
     user_id = new_user(db)
-    groceries = create_transactions(db, user_id, [*HISTORY, Decimal("540.00")], category="groceries")
+    groceries = create_transactions(
+        db, user_id, [*HISTORY, Decimal("540.00")], category="groceries"
+    )
     dining = create_transactions(db, user_id, HISTORY, category="dining")
     db.close()
 
@@ -220,7 +232,9 @@ def test_values_populated_with_expected_keys_and_correct_figures():
     hits = evaluate_amount_deviation(txns)
 
     expected_mean = mean(HISTORY)
-    expected_stdev = stdev(HISTORY)  # already above MIN_STD_DEV_FLOOR, so the floor is inert
+    expected_stdev = stdev(
+        HISTORY
+    )  # already above MIN_STD_DEV_FLOOR, so the floor is inert
     expected_pct = (Decimal("540.00") - expected_mean) / expected_mean * 100
     assert hits[0].values == {
         "amount": Decimal("540.00"),

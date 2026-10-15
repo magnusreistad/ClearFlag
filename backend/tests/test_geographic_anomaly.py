@@ -17,7 +17,9 @@ from app.rules.geographic_anomaly import (
 # objects straight to evaluate_geographic_anomaly() after the session
 # closes, so their attributes must stay readable without a live session to
 # refresh from.
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
+TestingSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
+)
 
 
 BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
@@ -50,8 +52,12 @@ def new_user(db: Session) -> int:
     return user.id
 
 
-def add_transaction(db: Session, user_id: int, day_offset: int, lat: float, lon: float, label: str) -> Transaction:
-    tx = make_transaction(user_id, BASE_TIME + timedelta(days=day_offset), lat, lon, label)
+def add_transaction(
+    db: Session, user_id: int, day_offset: int, lat: float, lon: float, label: str
+) -> Transaction:
+    tx = make_transaction(
+        user_id, BASE_TIME + timedelta(days=day_offset), lat, lon, label
+    )
     db.add(tx)
     db.commit()
     return tx
@@ -88,7 +94,9 @@ def test_distance_at_or_below_historical_mean_does_not_flag():
     history = create_metro_history(db, user_id)
     # Issaquah, WA: ~12.46 mi from centroid, below the ~13.10 mi historical
     # mean -- an unusually *close* location isn't a fraud signal.
-    candidate = add_transaction(db, user_id, len(history), 47.5301, -122.0326, "Issaquah, WA")
+    candidate = add_transaction(
+        db, user_id, len(history), 47.5301, -122.0326, "Issaquah, WA"
+    )
     db.close()
 
     hits = evaluate_geographic_anomaly([*history, candidate])
@@ -102,7 +110,9 @@ def test_above_mean_but_below_threshold_does_not_flag():
     history = create_metro_history(db, user_id)
     # North Bend, WA: ~23.92 mi from centroid, z ~= 0.92 -- above the mean
     # but well under the 3-stdev bar (~48.49 mi).
-    candidate = add_transaction(db, user_id, len(history), 47.4915, -121.7867, "North Bend, WA")
+    candidate = add_transaction(
+        db, user_id, len(history), 47.4915, -121.7867, "North Bend, WA"
+    )
     db.close()
 
     hits = evaluate_geographic_anomaly([*history, candidate])
@@ -116,7 +126,9 @@ def test_far_outside_cluster_flags():
     history = create_metro_history(db, user_id)
     # Portland, OR: ~147 mi from centroid, z ~= 11.36 -- clears the default
     # 3-stdev bar by a wide margin.
-    candidate = add_transaction(db, user_id, len(history), 45.5152, -122.6784, "Portland, OR")
+    candidate = add_transaction(
+        db, user_id, len(history), 45.5152, -122.6784, "Portland, OR"
+    )
     db.close()
 
     hits = evaluate_geographic_anomaly([*history, candidate])
@@ -129,7 +141,9 @@ def test_rationale_uses_location_label():
     db = TestingSessionLocal()
     user_id = new_user(db)
     history = create_metro_history(db, user_id)
-    candidate = add_transaction(db, user_id, len(history), 45.5152, -122.6784, "Portland, OR")
+    candidate = add_transaction(
+        db, user_id, len(history), 45.5152, -122.6784, "Portland, OR"
+    )
     db.close()
 
     hits = evaluate_geographic_anomaly([*history, candidate])
@@ -152,14 +166,21 @@ def test_values_populated_with_expected_keys_and_correct_figures():
     db = TestingSessionLocal()
     user_id = new_user(db)
     history = create_metro_history(db, user_id)
-    candidate = add_transaction(db, user_id, len(history), 45.5152, -122.6784, "Portland, OR")
+    candidate = add_transaction(
+        db, user_id, len(history), 45.5152, -122.6784, "Portland, OR"
+    )
     db.close()
 
     hits = evaluate_geographic_anomaly([*history, candidate])
 
     centroid_lat, centroid_lon = _centroid(history)
-    historical_distances = [_haversine_miles(centroid_lat, centroid_lon, h.latitude, h.longitude) for h in history]
-    expected_current_distance = _haversine_miles(centroid_lat, centroid_lon, candidate.latitude, candidate.longitude)
+    historical_distances = [
+        _haversine_miles(centroid_lat, centroid_lon, h.latitude, h.longitude)
+        for h in history
+    ]
+    expected_current_distance = _haversine_miles(
+        centroid_lat, centroid_lon, candidate.latitude, candidate.longitude
+    )
     expected_mean = mean(historical_distances)
     expected_stdev = max(stdev(historical_distances), MIN_STD_DEV_FLOOR_MILES)
 
@@ -176,7 +197,10 @@ def test_too_few_historical_locations_does_not_flag():
     user_id = new_user(db)
     # Only 4 prior locations -- below MIN_HISTORY_COUNT of 5 -- however far
     # the 5th one is.
-    history = [add_transaction(db, user_id, i, lat, lon, label) for i, (lat, lon, label) in enumerate(METRO_HISTORY[:4])]
+    history = [
+        add_transaction(db, user_id, i, lat, lon, label)
+        for i, (lat, lon, label) in enumerate(METRO_HISTORY[:4])
+    ]
     candidate = add_transaction(db, user_id, 10, 13.7563, 100.5018, "Bangkok, Thailand")
     db.close()
 
@@ -203,7 +227,10 @@ def test_zero_variance_history_does_not_explode_on_tiny_deviation():
     user_id = new_user(db)
     # Five identical prior locations (stdev=0), then a ~2 mi bump -- small in
     # absolute terms, but "infinite" stdevs without the floor.
-    history = [add_transaction(db, user_id, i, 47.6062, -122.3321, "Seattle, WA") for i in range(5)]
+    history = [
+        add_transaction(db, user_id, i, 47.6062, -122.3321, "Seattle, WA")
+        for i in range(5)
+    ]
     candidate = add_transaction(db, user_id, 5, 47.6350, -122.3321, "North Seattle, WA")
     db.close()
 
@@ -215,7 +242,10 @@ def test_zero_variance_history_does_not_explode_on_tiny_deviation():
 def test_zero_variance_history_still_flags_large_deviation():
     db = TestingSessionLocal()
     user_id = new_user(db)
-    history = [add_transaction(db, user_id, i, 47.6062, -122.3321, "Seattle, WA") for i in range(5)]
+    history = [
+        add_transaction(db, user_id, i, 47.6062, -122.3321, "Seattle, WA")
+        for i in range(5)
+    ]
     candidate = add_transaction(db, user_id, 5, 13.7563, 100.5018, "Bangkok, Thailand")
     db.close()
 
@@ -229,7 +259,9 @@ def test_unsorted_input_still_correct():
     db = TestingSessionLocal()
     user_id = new_user(db)
     history = create_metro_history(db, user_id)
-    candidate = add_transaction(db, user_id, len(history), 45.5152, -122.6784, "Portland, OR")
+    candidate = add_transaction(
+        db, user_id, len(history), 45.5152, -122.6784, "Portland, OR"
+    )
     db.close()
     shuffled = list(reversed([*history, candidate]))
 
@@ -244,7 +276,10 @@ def test_custom_threshold_narrows_what_flags():
     user_id = new_user(db)
     # ~15.2 mi bump against a zero-variance (floored at 10 mi) history: z ~=
     # 1.52 -- under the default 3-stdev bar but over a tighter 1-stdev bar.
-    history = [add_transaction(db, user_id, i, 47.6062, -122.3321, "Seattle, WA") for i in range(5)]
+    history = [
+        add_transaction(db, user_id, i, 47.6062, -122.3321, "Seattle, WA")
+        for i in range(5)
+    ]
     candidate = add_transaction(db, user_id, 5, 47.8262, -122.3321, "Nearby Town, WA")
     db.close()
     txns = [*history, candidate]

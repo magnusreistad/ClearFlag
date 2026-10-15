@@ -301,7 +301,11 @@ def _regular_inflection_candidates(word: str) -> list[str]:
         candidates.append(stem_drop_d)  # base+d -> base
         stem_drop_ed = word[:-2]
         candidates.append(stem_drop_ed)  # look+ed -> look
-        if len(stem_drop_ed) > 2 and stem_drop_ed[-1] == stem_drop_ed[-2] and stem_drop_ed[-1] not in "aeiou":
+        if (
+            len(stem_drop_ed) > 2
+            and stem_drop_ed[-1] == stem_drop_ed[-2]
+            and stem_drop_ed[-1] not in "aeiou"
+        ):
             candidates.append(stem_drop_ed[:-1])  # stopp+ed -> stop (doubled consonant)
 
     if word.endswith("ies") and len(word) > 4:
@@ -353,7 +357,11 @@ def _is_common_word(word: str) -> bool:
         return True
     if lowered.endswith("ly") and len(lowered) > 3 and lowered[:-2] in _COMMON_WORDS:
         return True
-    return any(candidate in _COMMON_WORDS for candidate in _regular_inflection_candidates(lowered))
+    return any(
+        candidate in _COMMON_WORDS
+        for candidate in _regular_inflection_candidates(lowered)
+    )
+
 
 # --- unit inference -------------------------------------------------------
 
@@ -421,7 +429,9 @@ def _last_key(path: str) -> str:
     return path.rsplit(".", 1)[-1].split("[", 1)[0]
 
 
-def _flatten_facts(prefix: str, obj: Any, numeric: list[NumericFact], strings: list[StringFact]) -> None:
+def _flatten_facts(
+    prefix: str, obj: Any, numeric: list[NumericFact], strings: list[StringFact]
+) -> None:
     """Walks a nested payload/evidence/derived structure, collecting every
     leaf value as a citable fact tagged with its source path. Booleans and
     None are never citable (a rationale saying "true" or "first" isn't
@@ -430,7 +440,9 @@ def _flatten_facts(prefix: str, obj: Any, numeric: list[NumericFact], strings: l
     """
     if isinstance(obj, dict):
         for key, value in obj.items():
-            _flatten_facts(f"{prefix}.{key}" if prefix else key, value, numeric, strings)
+            _flatten_facts(
+                f"{prefix}.{key}" if prefix else key, value, numeric, strings
+            )
         return
     if isinstance(obj, (list, tuple)):
         for i, value in enumerate(obj):
@@ -441,13 +453,19 @@ def _flatten_facts(prefix: str, obj: Any, numeric: list[NumericFact], strings: l
     if key in _EXCLUDED_KEYS or isinstance(obj, bool):
         return
     if isinstance(obj, (int, float, Decimal)):
-        numeric.append(NumericFact(value=Decimal(str(obj)), unit=_UNIT_BY_KEY.get(key), source=prefix))
+        numeric.append(
+            NumericFact(
+                value=Decimal(str(obj)), unit=_UNIT_BY_KEY.get(key), source=prefix
+            )
+        )
     elif isinstance(obj, str):
         strings.append(StringFact(value=obj, source=prefix))
     # None, datetime, and anything else: not citable, silently skipped.
 
 
-def _build_citable_facts(payload: dict[str, Any], evidence: dict[str, Any]) -> tuple[list[NumericFact], list[StringFact]]:
+def _build_citable_facts(
+    payload: dict[str, Any], evidence: dict[str, Any]
+) -> tuple[list[NumericFact], list[StringFact]]:
     numeric: list[NumericFact] = []
     strings: list[StringFact] = []
     _flatten_facts("transaction", payload.get("transaction", {}), numeric, strings)
@@ -499,7 +517,12 @@ def _extract_numbers(rationale: str) -> list[dict[str, Any]]:
             unit = None
 
         tokens.append(
-            {"span": match.group(0), "value": value, "precision": precision, "unit": unit}
+            {
+                "span": match.group(0),
+                "value": value,
+                "precision": precision,
+                "unit": unit,
+            }
         )
     return tokens
 
@@ -512,7 +535,9 @@ def _check_number(token: dict[str, Any], facts: list[NumericFact]) -> Violation 
         if _round_to(fact.value, precision, ROUND_HALF_UP) == value:
             return None  # grounded
 
-    other_unit_facts = [f for f in facts if unit is not None and f.unit is not None and f.unit != unit]
+    other_unit_facts = [
+        f for f in facts if unit is not None and f.unit is not None and f.unit != unit
+    ]
     for fact in other_unit_facts:
         if _round_to(fact.value, precision, ROUND_HALF_UP) == value:
             return Violation(
@@ -527,7 +552,9 @@ def _check_number(token: dict[str, Any], facts: list[NumericFact]) -> Violation 
 
     for fact in same_unit_facts:
         truncated = _round_to(fact.value, precision, ROUND_DOWN)
-        if truncated == value and truncated != _round_to(fact.value, precision, ROUND_HALF_UP):
+        if truncated == value and truncated != _round_to(
+            fact.value, precision, ROUND_HALF_UP
+        ):
             return Violation(
                 span=token["span"],
                 violation_type="truncated_number",
@@ -601,7 +628,10 @@ def _strip_stopword_prefix(span: str) -> str:
 
 def _is_citable_string(candidate: str, strings: list[StringFact]) -> bool:
     lowered = candidate.strip(" .,").lower()
-    return any(lowered in fact.value.lower() or fact.value.lower() in lowered for fact in strings)
+    return any(
+        lowered in fact.value.lower() or fact.value.lower() in lowered
+        for fact in strings
+    )
 
 
 def _check_entities(rationale: str, strings: list[StringFact]) -> list[Violation]:
@@ -649,7 +679,9 @@ def _check_entities(rationale: str, strings: list[StringFact]) -> list[Violation
             continue
         if span_text == "Flagged" and rationale[match.end() : match.end() + 1] == ":":
             continue  # the interim formatter's own template keyword, not a proper noun
-        if _is_sentence_initial(rationale, match.start()) and _is_common_word(span_text):
+        if _is_sentence_initial(rationale, match.start()) and _is_common_word(
+            span_text
+        ):
             continue
         if not _is_citable_string(span_text, strings):
             violations.append(
@@ -666,7 +698,9 @@ def _check_entities(rationale: str, strings: list[StringFact]) -> list[Violation
 # --- entry point -------------------------------------------------------------
 
 
-def validate_rationale(rationale: str, payload: dict[str, Any], evidence: dict[str, Any]) -> ValidationResult:
+def validate_rationale(
+    rationale: str, payload: dict[str, Any], evidence: dict[str, Any]
+) -> ValidationResult:
     """Checks that every number and proper-noun-like phrase in `rationale`
     traces back to a value in `payload` or `evidence` (or a value this
     module derives from `payload` -- see derived_facts.py), and that
@@ -685,7 +719,11 @@ def validate_rationale(rationale: str, payload: dict[str, Any], evidence: dict[s
         return ValidationResult(
             passed=False,
             violations=[
-                Violation(span="", violation_type="empty_rationale", reason="Rationale is empty or whitespace-only.")
+                Violation(
+                    span="",
+                    violation_type="empty_rationale",
+                    reason="Rationale is empty or whitespace-only.",
+                )
             ],
         )
 

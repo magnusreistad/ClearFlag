@@ -54,7 +54,10 @@ def seed_user_with_outlier(name: str = "Disposition User") -> tuple[int, int, in
     user = User(name=name)
     db.add(user)
     db.flush()
-    history = [make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00")) for i in range(5)]
+    history = [
+        make_transaction(user.id, days_ago=10 - i, amount=Decimal("10.00"))
+        for i in range(5)
+    ]
     outlier = make_transaction(user.id, days_ago=0, amount=Decimal("500.00"))
     db.add_all([*history, outlier])
     db.commit()
@@ -91,7 +94,9 @@ def flag_ids(transaction_id: int) -> set[int]:
     db = TestingSessionLocal()
     ids = {
         flag_id
-        for (flag_id,) in db.query(TransactionFlag.id).filter(TransactionFlag.transaction_id == transaction_id)
+        for (flag_id,) in db.query(TransactionFlag.id).filter(
+            TransactionFlag.transaction_id == transaction_id
+        )
     }
     db.close()
     return ids
@@ -128,7 +133,9 @@ def test_post_creates_a_disposition_with_the_flags_rule_names_snapshot():
     user_id, outlier_id, _ = seed_user_with_outlier()
     items = refresh(user_id)
 
-    response = post_disposition(outlier_id, user_id, disposition="confirmed_fraud", note="Customer confirmed.")
+    response = post_disposition(
+        outlier_id, user_id, disposition="confirmed_fraud", note="Customer confirmed."
+    )
 
     assert response.status_code == 201
     body = response.json()
@@ -188,7 +195,11 @@ def test_post_before_any_flag_refresh_is_409():
 @pytest.mark.parametrize(
     ("params", "body"),
     [
-        pytest.param({"user_id": "USER"}, {"disposition": "maybe_fraud"}, id="unknown-disposition"),
+        pytest.param(
+            {"user_id": "USER"},
+            {"disposition": "maybe_fraud"},
+            id="unknown-disposition",
+        ),
         pytest.param({"user_id": "USER"}, {}, id="missing-disposition"),
         pytest.param(
             {"user_id": "USER"},
@@ -201,9 +212,13 @@ def test_post_before_any_flag_refresh_is_409():
 def test_post_invalid_request_is_422(params, body):
     user_id, outlier_id, _ = seed_user_with_outlier()
     refresh(user_id)
-    params = {key: user_id if value == "USER" else value for key, value in params.items()}
+    params = {
+        key: user_id if value == "USER" else value for key, value in params.items()
+    }
 
-    response = client.post(f"/transactions/{outlier_id}/disposition", params=params, json=body)
+    response = client.post(
+        f"/transactions/{outlier_id}/disposition", params=params, json=body
+    )
 
     assert response.status_code == 422
     assert disposition_rows() == []
@@ -213,7 +228,9 @@ def test_post_accepts_a_note_at_the_max_length():
     user_id, outlier_id, _ = seed_user_with_outlier()
     refresh(user_id)
 
-    response = post_disposition(outlier_id, user_id, note="x" * DISPOSITION_NOTE_MAX_LENGTH)
+    response = post_disposition(
+        outlier_id, user_id, note="x" * DISPOSITION_NOTE_MAX_LENGTH
+    )
 
     assert response.status_code == 201
     assert len(disposition_rows(outlier_id)[0].note) == DISPOSITION_NOTE_MAX_LENGTH
@@ -247,9 +264,14 @@ def test_repeated_posts_append_and_get_shows_the_latest():
     refresh(user_id)
 
     post_disposition(outlier_id, user_id, disposition="false_positive")
-    post_disposition(outlier_id, user_id, disposition="confirmed_fraud", note="Second look.")
+    post_disposition(
+        outlier_id, user_id, disposition="confirmed_fraud", note="Second look."
+    )
 
-    assert [row.disposition for row in disposition_rows(outlier_id)] == ["false_positive", "confirmed_fraud"]
+    assert [row.disposition for row in disposition_rows(outlier_id)] == [
+        "false_positive",
+        "confirmed_fraud",
+    ]
     disposition = refresh(user_id)[outlier_id]["disposition"]
     assert disposition["value"] == "confirmed_fraud"
     assert disposition["note"] == "Second look."
@@ -261,11 +283,19 @@ def test_latest_wins_on_a_created_at_tie_by_id():
     created_at alone can't order them -- id breaks the tie."""
     user_id, outlier_id, _ = seed_user_with_outlier()
     db = TestingSessionLocal()
-    db.add(TransactionDisposition(transaction_id=outlier_id, disposition="ignored", rule_names=["amount_deviation"]))
+    db.add(
+        TransactionDisposition(
+            transaction_id=outlier_id,
+            disposition="ignored",
+            rule_names=["amount_deviation"],
+        )
+    )
     db.flush()
     db.add(
         TransactionDisposition(
-            transaction_id=outlier_id, disposition="false_positive", rule_names=["amount_deviation"]
+            transaction_id=outlier_id,
+            disposition="false_positive",
+            rule_names=["amount_deviation"],
         )
     )
     db.commit()
@@ -279,9 +309,14 @@ def test_latest_wins_on_a_created_at_tie_by_id():
 def test_disposition_survives_a_flag_refresh():
     user_id, outlier_id, _ = seed_user_with_outlier()
     refresh(user_id)
-    post_disposition(outlier_id, user_id, disposition="false_positive", note="Known big shop.")
+    post_disposition(
+        outlier_id, user_id, disposition="false_positive", note="Known big shop."
+    )
     flag_ids_before = flag_ids(outlier_id)
-    rows_before = [(row.id, row.disposition, row.note, row.rule_names) for row in disposition_rows()]
+    rows_before = [
+        (row.id, row.disposition, row.note, row.rule_names)
+        for row in disposition_rows()
+    ]
 
     items = refresh(user_id)
 
@@ -289,7 +324,10 @@ def test_disposition_survives_a_flag_refresh():
     # this, a GET that skipped the refresh would pass trivially.
     flag_ids_after = flag_ids(outlier_id)
     assert flag_ids_after and flag_ids_after.isdisjoint(flag_ids_before)
-    assert [(row.id, row.disposition, row.note, row.rule_names) for row in disposition_rows()] == rows_before
+    assert [
+        (row.id, row.disposition, row.note, row.rule_names)
+        for row in disposition_rows()
+    ] == rows_before
     assert items[outlier_id]["disposition"]["value"] == "false_positive"
     assert items[outlier_id]["disposition"]["note"] == "Known big shop."
 
@@ -300,7 +338,9 @@ def test_disposition_and_its_rule_snapshot_survive_the_flag_disappearing():
     post_disposition(outlier_id, user_id, disposition="false_positive")
 
     db = TestingSessionLocal()
-    db.query(Transaction).filter(Transaction.id == outlier_id).one().amount = Decimal("10.00")
+    db.query(Transaction).filter(Transaction.id == outlier_id).one().amount = Decimal(
+        "10.00"
+    )
     db.commit()
     db.close()
     items = refresh(user_id)
@@ -317,7 +357,11 @@ def test_get_uses_one_disposition_query_whatever_the_page_size():
     db = TestingSessionLocal()
     for transaction in db.query(Transaction).filter(Transaction.user_id == user_id):
         db.add(
-            TransactionDisposition(transaction_id=transaction.id, disposition="ignored", rule_names=["velocity"])
+            TransactionDisposition(
+                transaction_id=transaction.id,
+                disposition="ignored",
+                rule_names=["velocity"],
+            )
         )
     db.commit()
     db.close()
@@ -329,7 +373,11 @@ def test_get_uses_one_disposition_query_whatever_the_page_size():
 
     assert len(small) == 1 and len(large) == 6
     assert all(item["disposition"] is not None for item in large.values())
-    assert len(one_item.touching_dispositions()) == len(every_item.touching_dispositions()) == 1
+    assert (
+        len(one_item.touching_dispositions())
+        == len(every_item.touching_dispositions())
+        == 1
+    )
     assert len(one_item.statements) == len(every_item.statements)
 
 
@@ -337,15 +385,25 @@ def test_get_never_writes_to_dispositions():
     user_id, outlier_id, _ = seed_user_with_outlier()
     refresh(user_id)
     post_disposition(outlier_id, user_id)
-    rows_before = [(row.id, row.disposition, row.note, row.rule_names) for row in disposition_rows()]
+    rows_before = [
+        (row.id, row.disposition, row.note, row.rule_names)
+        for row in disposition_rows()
+    ]
 
     with StatementLog() as log:
         refresh(user_id)
         refresh(user_id)
 
-    writes = [s for s in log.touching_dispositions() if not s.lstrip().upper().startswith("SELECT")]
+    writes = [
+        s
+        for s in log.touching_dispositions()
+        if not s.lstrip().upper().startswith("SELECT")
+    ]
     assert writes == []
-    assert [(row.id, row.disposition, row.note, row.rule_names) for row in disposition_rows()] == rows_before
+    assert [
+        (row.id, row.disposition, row.note, row.rule_names)
+        for row in disposition_rows()
+    ] == rows_before
 
 
 def test_get_is_a_500_not_a_null_when_the_disposition_lookup_fails():
@@ -356,9 +414,15 @@ def test_get_is_a_500_not_a_null_when_the_disposition_lookup_fails():
     refresh(user_id)
     post_disposition(outlier_id, user_id)
 
-    def fail_disposition_reads(conn, cursor, statement, parameters, context, executemany):
-        if statement.lstrip().startswith("SELECT DISTINCT ON (transaction_dispositions"):
-            raise OperationalError(statement, parameters, Exception("simulated lookup failure"))
+    def fail_disposition_reads(
+        conn, cursor, statement, parameters, context, executemany
+    ):
+        if statement.lstrip().startswith(
+            "SELECT DISTINCT ON (transaction_dispositions"
+        ):
+            raise OperationalError(
+                statement, parameters, Exception("simulated lookup failure")
+            )
 
     event.listen(engine, "before_cursor_execute", fail_disposition_reads)
     try:
@@ -379,12 +443,18 @@ def test_get_is_a_500_not_a_null_when_the_disposition_lookup_fails():
 @pytest.mark.parametrize(
     ("column_values", "constraint"),
     [
-        ("'maybe_fraud', NULL, ARRAY['velocity']", "ck_transaction_dispositions_disposition_value"),
+        (
+            "'maybe_fraud', NULL, ARRAY['velocity']",
+            "ck_transaction_dispositions_disposition_value",
+        ),
         (
             f"'ignored', repeat('x', {DISPOSITION_NOTE_MAX_LENGTH + 1}), ARRAY['velocity']",
             "ck_transaction_dispositions_note_length",
         ),
-        ("'ignored', NULL, ARRAY[]::varchar[]", "ck_transaction_dispositions_rule_names_not_empty"),
+        (
+            "'ignored', NULL, ARRAY[]::varchar[]",
+            "ck_transaction_dispositions_rule_names_not_empty",
+        ),
     ],
 )
 def test_database_check_constraints_reject_invalid_rows(column_values, constraint):

@@ -76,7 +76,9 @@ def rule_names_by_transaction(hits: Sequence[FlagHit]) -> dict[int, list[str]]:
     return dict(names_by_transaction)
 
 
-def rule_values_by_transaction(hits: Sequence[FlagHit]) -> dict[int, dict[str, dict[str, Any]]]:
+def rule_values_by_transaction(
+    hits: Sequence[FlagHit],
+) -> dict[int, dict[str, dict[str, Any]]]:
     """Group hits by transaction_id into {rule_name: values}, mirroring
     rule_names_by_transaction's grouping (SCRUM-68). This is the per-rule
     structured-facts counterpart an Investigation Agent payload needs

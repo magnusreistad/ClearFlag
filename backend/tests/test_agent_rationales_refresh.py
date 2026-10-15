@@ -40,7 +40,9 @@ def scratch_db(migrated_scratch_database_url, monkeypatch):
     shared session schema every other test relies on is never touched.
     Returns that database's engine."""
     scratch_engine = create_engine(migrated_scratch_database_url)
-    scratch_session_local = sessionmaker(autocommit=False, autoflush=False, bind=scratch_engine)
+    scratch_session_local = sessionmaker(
+        autocommit=False, autoflush=False, bind=scratch_engine
+    )
 
     def scratch_get_db():
         db = scratch_session_local()
@@ -105,7 +107,9 @@ def _seed_flagged_transaction() -> tuple[int, int, str]:
     db.add_all([*history, outlier])
     db.commit()
     user_id, outlier_id = user.id, outlier.id
-    all_transactions = db.query(Transaction).filter(Transaction.user_id == user_id).all()
+    all_transactions = (
+        db.query(Transaction).filter(Transaction.user_id == user_id).all()
+    )
     fingerprint = _fingerprint_for(all_transactions, outlier_id)
     db.close()
     return user_id, outlier_id, fingerprint
@@ -135,7 +139,10 @@ def test_hit_serves_the_cached_agent_rationale():
     assert response.status_code == 200
     items_by_id = {item["id"]: item for item in response.json()["items"]}
 
-    assert items_by_id[outlier_id]["rationale"] == "This $500.00 purchase was flagged by the Investigation Agent."
+    assert (
+        items_by_id[outlier_id]["rationale"]
+        == "This $500.00 purchase was flagged by the Investigation Agent."
+    )
     assert items_by_id[outlier_id]["is_flagged"] is True
 
 
@@ -156,7 +163,13 @@ def test_failed_only_row_serves_the_interim_rationale():
         fact_fingerprint=fingerprint,
         validation_passed=False,
         rationale=None,
-        violations=[{"span": "", "violation_type": "empty_rationale", "reason": "Rationale is empty."}],
+        violations=[
+            {
+                "span": "",
+                "violation_type": "empty_rationale",
+                "reason": "Rationale is empty.",
+            }
+        ],
         composition_error="simulated model timeout",
     )
 
@@ -185,7 +198,13 @@ def test_failed_row_with_composed_text_still_serves_interim_never_the_failed_tex
         rationale=None,
         composed_text=leaked_marker,
         validator_version="v3",
-        violations=[{"span": "Wakanda", "violation_type": "unsupported_entity", "reason": "not citable"}],
+        violations=[
+            {
+                "span": "Wakanda",
+                "violation_type": "unsupported_entity",
+                "reason": "not citable",
+            }
+        ],
     )
 
     response = client.get("/transactions", params={"user_id": user_id})
@@ -235,7 +254,9 @@ def test_refresh_makes_zero_writes_to_agent_rationales():
     assert after_count == before_count
 
 
-def test_agent_rationales_lookup_failure_serves_interim_for_every_flag(caplog, scratch_db):
+def test_agent_rationales_lookup_failure_serves_interim_for_every_flag(
+    caplog, scratch_db
+):
     """SCRUM-56: _lookup_agent_rationales wraps its SELECT in its own
     SAVEPOINT (db.begin_nested()) and catches SQLAlchemyError -- so a
     lookup-layer failure (simulated here by dropping the agent_rationales
@@ -268,7 +289,11 @@ def test_agent_rationales_lookup_failure_serves_interim_for_every_flag(caplog, s
     assert "higher than your typical spend" in items_by_id[outlier_id]["rationale"]
 
     db = TestingSessionLocal()
-    flag_count = db.query(TransactionFlag).filter(TransactionFlag.transaction_id == outlier_id).count()
+    flag_count = (
+        db.query(TransactionFlag)
+        .filter(TransactionFlag.transaction_id == outlier_id)
+        .count()
+    )
     db.close()
     assert flag_count == 1  # the flags _refresh_flags already committed are untouched
 

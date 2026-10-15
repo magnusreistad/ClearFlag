@@ -10,13 +10,17 @@ from app.rules.velocity import evaluate_velocity
 # expire_on_commit=False: unlike test_transactions.py, these tests hand ORM
 # objects straight to evaluate_velocity() after the session closes, so their
 # attributes must stay readable without a live session to refresh from.
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
+TestingSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
+)
 
 
 BASE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def make_transaction(user_id: int, timestamp: datetime, merchant: str = "Test Merchant") -> Transaction:
+def make_transaction(
+    user_id: int, timestamp: datetime, merchant: str = "Test Merchant"
+) -> Transaction:
     return Transaction(
         user_id=user_id,
         timestamp=timestamp,
@@ -36,8 +40,13 @@ def new_user(db: Session) -> int:
     return user.id
 
 
-def create_transactions(db: Session, user_id: int, offsets_minutes: list[float]) -> list[Transaction]:
-    txns = [make_transaction(user_id, BASE_TIME + timedelta(minutes=m)) for m in offsets_minutes]
+def create_transactions(
+    db: Session, user_id: int, offsets_minutes: list[float]
+) -> list[Transaction]:
+    txns = [
+        make_transaction(user_id, BASE_TIME + timedelta(minutes=m))
+        for m in offsets_minutes
+    ]
     db.add_all(txns)
     db.commit()
     return txns
