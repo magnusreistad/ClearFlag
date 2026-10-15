@@ -1,0 +1,6 @@
+# Bulk mechanical changes to skip in git blame. GitHub applies this file
+# automatically; locally run once:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# SCRUM-79: Apply ruff format to the backend
+bd64d4736f62b86636ab512bf9d09fa7ffb82e6d
