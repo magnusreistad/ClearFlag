@@ -9,7 +9,7 @@ on:
 jobs:
   backend-lint-test:
     name: Backend Lint & Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
