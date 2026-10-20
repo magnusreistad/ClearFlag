@@ -88,9 +88,12 @@ def _first_purchases(user_id: int, count: int, *, category: str) -> list[Transac
 
 
 def _seed_velocity(user_id):
-    # 6 transactions inside the 10-minute window (velocity: more than 5).
-    # The rule flags every member of the burst; the last is the primary.
-    burst = [_txn(user_id, BASE_TIME - timedelta(minutes=5 - i)) for i in range(6)]
+    # 7 transactions inside the 10-minute window (velocity: more than 5).
+    # SCRUM-76: only the 6th and 7th flag (counts 6 and 7) -- each earlier
+    # member's own window holds 5 or fewer. Two flagged members keep the
+    # pipeline's multi-transaction ordering tests meaningful; the last is
+    # the primary.
+    burst = [_txn(user_id, BASE_TIME - timedelta(minutes=6 - i)) for i in range(7)]
     return burst, burst[-1]
 
 
@@ -168,7 +171,7 @@ SCENARIOS: dict[str, Scenario] = {
             _seed_velocity,
             ("velocity",),
             frozenset({"get_transaction_history"}),
-            6,
+            2,
         ),
         Scenario(
             "amount_deviation",

@@ -139,9 +139,10 @@ def test_transaction_triggering_multiple_rules_concatenates_rationale():
     db.add(user)
     db.flush()
     base_time = datetime.now(UTC) - timedelta(hours=1)
-    # 6 transactions within 10 minutes trips velocity for all 6; the 6th is
-    # also a $500 outlier against the $10 history the first 5 establish in
-    # the same category, tripping amount deviation too.
+    # 6 transactions within 10 minutes trips velocity on the 6th, whose
+    # window holds all 6 (SCRUM-76); the 6th is also a $500 outlier against
+    # the $10 history the first 5 establish in the same category, tripping
+    # amount deviation too.
     offsets = [0, 2, 4, 6, 8, 10]
     amounts = [Decimal("10.00")] * 5 + [Decimal("500.00")]
     txns = [
