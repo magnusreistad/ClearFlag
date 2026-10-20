@@ -20,6 +20,7 @@ from app.rules.geographic_anomaly import (
     _haversine_miles,
     evaluate_geographic_anomaly,
 )
+from app.rules.velocity import DEFAULT_MAX_COUNT, evaluate_velocity
 from scripts.seed_transactions import generate_triple_rule_fraud
 
 
@@ -387,6 +388,52 @@ class TestGetTransactionHistory:
 
         assert evidence["transactions"] == []
         assert evidence["count"] == 0
+
+    def test_count_matches_the_velocity_rules_own_count_for_every_transaction(
+        self,
+    ):
+        """SCRUM-76 drift check, modelled on SCRUM-50's
+        test_distance_matches_geographic_anomalys_own_computation: run the
+        rule and the tool over the same persisted rows and require them to
+        agree for EVERY transaction, flagged or not -- a flagged one's tool
+        count must equal the rule's transaction_count, an unflagged one's
+        must not exceed the threshold. The offsets carry a burst's lead-in
+        (0-4, which look-ahead would flag), a same-timestamp tie (5, 5), an
+        exact window-start boundary (0 is exactly 10 minutes before 10), and
+        a trailing transaction after the burst (20).
+        """
+        base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        offsets = [0, 1, 2, 3, 4, 5, 5, 10, 20]
+        db = TestingSessionLocal()
+        try:
+            user = User(name="Test User")
+            db.add(user)
+            db.flush()
+            db.add_all(
+                _make_transaction(user.id, base + timedelta(minutes=m)) for m in offsets
+            )
+            db.commit()
+
+            rows = db.query(Transaction).filter(Transaction.user_id == user.id).all()
+            hit_by_id = {h.transaction_id: h for h in evaluate_velocity(rows)}
+            tool_count_by_id = {
+                row.id: get_transaction_history.func(
+                    user_id=user.id, anchor_timestamp=row.timestamp
+                )[1]["count"]
+                for row in rows
+            }
+        finally:
+            db.close()
+
+        # Guards against a vacuous pass: the burst has both outcomes.
+        assert hit_by_id
+        assert len(hit_by_id) < len(rows)
+        for row in rows:
+            tool_count = tool_count_by_id[row.id]
+            if row.id in hit_by_id:
+                assert hit_by_id[row.id].values["transaction_count"] == tool_count
+            else:
+                assert tool_count <= DEFAULT_MAX_COUNT
 
 
 class TestGetMerchantRiskScore:
