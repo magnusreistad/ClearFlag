@@ -445,6 +445,29 @@ def generate_triple_rule_fraud(
     ]
 
 
+def generate_dataset(
+    user_id: int, start_date: datetime
+) -> tuple[list[Transaction], list[tuple[str, list[tuple[Transaction, str]]]]]:
+    """The full dataset -- baseline plus every planted scenario, grouped by
+    label -- built in memory without touching the database.
+
+    Re-seeds the random generator itself, so every call with the same
+    arguments returns the same rows. SCRUM-89: factored out of main() so
+    tests can run the rules engine over exactly what the seed inserts.
+    """
+    random.seed(SEED)
+    baseline = generate_baseline(user_id, start_date)
+    fraud_groups: list[tuple[str, list[tuple[Transaction, str]]]] = [
+        ("velocity", generate_velocity_fraud(user_id, start_date)),
+        ("geographic anomaly", generate_geo_anomaly_fraud(user_id, start_date)),
+        ("amount deviation", generate_amount_deviation_fraud(user_id, start_date)),
+        ("new merchant", generate_new_merchant_fraud(user_id, start_date)),
+        ("multi-rule", generate_multi_rule_fraud(user_id, start_date)),
+        ("triple-rule", generate_triple_rule_fraud(user_id, start_date)),
+    ]
+    return baseline, fraud_groups
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -453,7 +476,6 @@ def main() -> None:
     args = parser.parse_args()
 
     confirm_dev_database(skip_prompt=args.yes)
-    random.seed(SEED)
 
     db = SessionLocal()
     try:
@@ -487,16 +509,7 @@ def main() -> None:
             hour=0, minute=0, second=0, microsecond=0
         ) - timedelta(days=DAYS_OF_HISTORY - 1)
 
-        baseline = generate_baseline(user.id, start_date)
-
-        fraud_groups: list[tuple[str, list[tuple[Transaction, str]]]] = [
-            ("velocity", generate_velocity_fraud(user.id, start_date)),
-            ("geographic anomaly", generate_geo_anomaly_fraud(user.id, start_date)),
-            ("amount deviation", generate_amount_deviation_fraud(user.id, start_date)),
-            ("new merchant", generate_new_merchant_fraud(user.id, start_date)),
-            ("multi-rule", generate_multi_rule_fraud(user.id, start_date)),
-            ("triple-rule", generate_triple_rule_fraud(user.id, start_date)),
-        ]
+        baseline, fraud_groups = generate_dataset(user.id, start_date)
 
         db.add_all(baseline)
         for _, rows in fraud_groups:
