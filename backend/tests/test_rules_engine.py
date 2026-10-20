@@ -96,8 +96,8 @@ def test_transaction_triggering_multiple_rules_gets_one_hit_per_rule():
     db = TestingSessionLocal()
     user_id = new_user(db)
     # Mirrors test_velocity's test_max_count_plus_one_flags shape (6
-    # transactions within 10 minutes trips velocity for all 6), but the 6th
-    # is also an outlier against the $10 history the first 5 establish in
+    # transactions within 10 minutes trips velocity on the 6th, whose window
+    # holds all 6 -- SCRUM-76), and the 6th is also an outlier against the $10 history the first 5 establish in
     # the same category -- so it trips amount deviation too.
     offsets = [0, 2, 4, 6, 8, 10]
     amounts = [Decimal("10.00")] * 5 + [Decimal("500.00")]
@@ -116,13 +116,12 @@ def test_transaction_triggering_multiple_rules_gets_one_hit_per_rule():
     for hit in hits:
         hits_by_transaction.setdefault(hit.transaction_id, []).append(hit)
 
-    assert len(hits) == 7  # 6 velocity hits + 1 amount_deviation hit
+    assert len(hits) == 2  # 1 velocity hit + 1 amount_deviation hit
     assert {h.rule_name for h in hits_by_transaction[multi_hit_txn.id]} == {
         "velocity",
         "amount_deviation",
     }
-    for txn in txns[:-1]:
-        assert {h.rule_name for h in hits_by_transaction[txn.id]} == {"velocity"}
+    assert set(hits_by_transaction) == {multi_hit_txn.id}
 
 
 def test_concatenate_rationales_merges_multi_rule_hits_by_transaction_id():

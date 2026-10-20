@@ -192,7 +192,7 @@ def test_tool_evidence_is_real_and_agrees_with_the_rule(name, scripted_llm):
         assert (
             evidence["get_transaction_history"]["count"]
             == rule_values["velocity"]["transaction_count"]
-            == 6
+            == 7
         )
     if "new_merchant_risk" in rule_values:
         assert evidence["get_merchant_risk_score"]["is_first_transaction"] is True

@@ -105,8 +105,8 @@ class TestVelocityGroundsItself:
 
         hits = evaluate_velocity(txns, max_count=5, window_minutes=10)
 
-        assert len(hits) == 6
-        _assert_hit_grounds_itself(txns[0], "velocity", hits[0])
+        assert len(hits) == 1
+        _assert_hit_grounds_itself(txns[-1], "velocity", hits[0])
 
 
 class TestAmountDeviationGroundsItself:

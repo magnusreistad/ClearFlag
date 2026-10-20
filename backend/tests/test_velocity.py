@@ -63,7 +63,9 @@ def test_exact_max_count_does_not_flag():
     assert hits == []
 
 
-def test_max_count_plus_one_flags():
+def test_max_count_plus_one_flags_only_the_transaction_that_crosses_it():
+    """SCRUM-76: the first five don't flag -- their own windows hold at most
+    five -- only the sixth, whose window holds all six."""
     db = TestingSessionLocal()
     user_id = new_user(db)
     txns = create_transactions(db, user_id, [0, 2, 4, 6, 8, 10])
@@ -71,11 +73,11 @@ def test_max_count_plus_one_flags():
 
     hits = evaluate_velocity(txns, max_count=5, window_minutes=10)
 
-    assert {h.transaction_id for h in hits} == {t.id for t in txns}
-    assert all("6 transactions" in h.rationale for h in hits)
+    assert [h.transaction_id for h in hits] == [txns[-1].id]
+    assert "6 transactions" in hits[0].rationale
 
 
-def test_burst_larger_than_max_count_flags_every_member():
+def test_burst_flags_from_the_crossing_transaction_on():
     db = TestingSessionLocal()
     user_id = new_user(db)
     txns = create_transactions(db, user_id, [0, 1, 2, 3, 4, 5, 6])
@@ -83,27 +85,44 @@ def test_burst_larger_than_max_count_flags_every_member():
 
     hits = evaluate_velocity(txns, max_count=5, window_minutes=10)
 
-    assert len(hits) == 7
-    assert {h.transaction_id for h in hits} == {t.id for t in txns}
-    assert all("7 transactions" in h.rationale for h in hits)
+    assert [h.transaction_id for h in hits] == [txns[5].id, txns[6].id]
+    assert [h.values["transaction_count"] for h in hits] == [6, 7]
 
 
-def test_transaction_in_multiple_windows_uses_largest_count():
+def test_each_hit_reports_its_own_windows_count_not_a_later_one():
+    """SCRUM-76: the first six (offsets 0-5) cross the threshold at offset 5
+    with 6; the 7th (offset 9) grows its own window to 7. Under the old
+    look-ahead semantics offset 5 reported 7 -- now it reports only what
+    its own window held."""
     db = TestingSessionLocal()
     user_id = new_user(db)
-    # First 6 (offsets 0-5) alone form a count=6 window. Adding the 7th
-    # (offset 9) still fits within 10 minutes of offset 0, growing that same
-    # window to count=7 without the start pointer ever advancing -- so the
-    # first transaction is swept up in both a 6-count and a 7-count window.
     txns = create_transactions(db, user_id, [0, 1, 2, 3, 4, 5, 9])
     db.close()
-    first_txn = txns[0]
 
     hits = evaluate_velocity(txns, max_count=5, window_minutes=10)
 
     hit_by_id = {h.transaction_id: h for h in hits}
-    assert "7 transactions" in hit_by_id[first_txn.id].rationale
-    assert "6 transactions" not in hit_by_id[first_txn.id].rationale
+    assert set(hit_by_id) == {txns[5].id, txns[6].id}
+    assert "6 transactions" in hit_by_id[txns[5].id].rationale
+    assert "7 transactions" in hit_by_id[txns[6].id].rationale
+
+
+def test_window_includes_its_start_boundary_and_same_timestamp_transactions():
+    """Both bounds inclusive, as in get_transaction_history: offset 0 is
+    exactly 10 minutes before offset 10, and the two offset-5 transactions
+    each count the other."""
+    db = TestingSessionLocal()
+    user_id = new_user(db)
+    txns = create_transactions(db, user_id, [0, 1, 2, 3, 5, 5, 10])
+    db.close()
+
+    hits = evaluate_velocity(txns, max_count=5, window_minutes=10)
+
+    assert {h.transaction_id: h.values["transaction_count"] for h in hits} == {
+        txns[4].id: 6,
+        txns[5].id: 6,
+        txns[6].id: 7,
+    }
 
 
 def test_spread_out_transactions_no_false_positive():
@@ -126,9 +145,8 @@ def test_unsorted_input_still_correct():
 
     hits = evaluate_velocity(shuffled, max_count=5, window_minutes=10)
 
-    assert len(hits) == 7
-    assert {h.transaction_id for h in hits} == {t.id for t in txns}
-    assert all("7 transactions" in h.rationale for h in hits)
+    assert [h.transaction_id for h in hits] == [txns[5].id, txns[6].id]
+    assert [h.values["transaction_count"] for h in hits] == [6, 7]
 
 
 def test_empty_transaction_list_returns_empty():
@@ -152,9 +170,9 @@ def test_rationale_uses_actual_count_not_threshold():
 
     hits = evaluate_velocity(txns, max_count=5, window_minutes=10)
 
-    assert len(hits) == 8
-    for h in hits:
-        assert "8 transactions" in h.rationale
+    assert len(hits) == 3
+    for h, expected in zip(hits, [6, 7, 8], strict=True):
+        assert f"{expected} transactions" in h.rationale
         assert "5 transactions" not in h.rationale
         assert "in 10 minutes" in h.rationale
 
