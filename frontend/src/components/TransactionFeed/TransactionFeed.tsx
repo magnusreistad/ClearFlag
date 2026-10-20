@@ -36,7 +36,12 @@ function groupByDay(items: Transaction[]): DayGroup[] {
   return groups
 }
 
-export function TransactionFeed() {
+interface TransactionFeedProps {
+  // Called after a disposition is saved, e.g. so the summary can refetch.
+  onDispositionSaved?: () => void
+}
+
+export function TransactionFeed({ onDispositionSaved }: TransactionFeedProps = {}) {
   const [items, setItems] = useState<Transaction[]>([])
   const [total, setTotal] = useState<number | null>(null)
   const [status, setStatus] = useState<Status>('loading')
@@ -71,6 +76,7 @@ export function TransactionFeed() {
   // have to reload every page loaded so far.
   const handleDispositionSaved = (transactionId: number, disposition: CurrentDisposition) => {
     setItems((prev) => prev.map((item) => (item.id === transactionId ? { ...item, disposition } : item)))
+    onDispositionSaved?.()
   }
 
   const handleLoadMore = async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCategory, formatCurrency, formatGroupHeading, dateKey } from './format'
+import { formatCategory, formatCurrency, formatGroupHeading, formatRatio, formatWeek, dateKey } from './format'
 
 describe('formatCurrency', () => {
   it('formats a decimal string as a negative USD amount', () => {
@@ -29,5 +29,23 @@ describe('formatGroupHeading', () => {
 
   it('labels a date far in the past with weekday, month, and day', () => {
     expect(formatGroupHeading('2020-01-15')).toBe('Wednesday, Jan 15')
+  })
+})
+
+describe('formatRatio', () => {
+  it('formats a ratio as a percentage with at most one decimal', () => {
+    expect(formatRatio(0.75)).toBe('75%')
+    expect(formatRatio(0.625)).toBe('62.5%')
+    expect(formatRatio(0)).toBe('0%')
+  })
+
+  it('shows an em dash for null, not 0%', () => {
+    expect(formatRatio(null)).toBe('—')
+  })
+})
+
+describe('formatWeek', () => {
+  it('formats the UTC date, whatever the local time zone', () => {
+    expect(formatWeek('2026-07-13')).toBe('Jul 13')
   })
 })
