@@ -169,9 +169,9 @@ def get_transaction_history(
     window_minutes (plan_tool_calls passes DEFAULT_WINDOW_MINUTES) ending at
     the flagged transaction's own timestamp (see app.rules.velocity) -- so
     the evidence lines up with the count the rule already computed. The
-    window is inclusive of both endpoints, matching velocity.py's `> window`
-    (not `>=`) exclusion test, and includes the flagged transaction itself
-    since the rule's own count does.
+    window is inclusive of both endpoints, matching velocity.py's
+    bisect_left/bisect_right bounds (SCRUM-76), and includes the flagged
+    transaction itself since the rule's own count does.
 
     Opens its own session via _tool_session() (SCRUM-56: SessionLocal,
     module-level so tests can monkeypatch it, plus the configurable Postgres
