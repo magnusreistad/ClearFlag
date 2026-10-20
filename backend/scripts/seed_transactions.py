@@ -2,12 +2,12 @@
 
 Produces ~95 days of realistic, mostly-unremarkable spending for the single
 seeded user, with a handful of deliberately planted fraud scenarios mixed in
-(see PLANTED FRAUD SCENARIOS below). The Sprint 2 rules engine will consume
-this data; this script only needs the planted rows to be *distinct enough*
-from the baseline to be caught by reasonable thresholds later — exact
-thresholds are not decided yet.
+(see PLANTED FRAUD SCENARIOS below) for the rules engine (app/rules) to
+flag. Every plant trips the rule it targets at the engine's current
+thresholds, except the one new-merchant plant its reason line says doesn't.
 
-Idempotent: re-running clears this user's existing transactions first, so
+Idempotent: re-running clears this user's existing transactions first --
+with their flags, dispositions and agent rationales, which reference them -- so
 you always end up with exactly one clean generated dataset, not duplicates.
 Uses a fixed random seed, so the dataset is reproducible.
 
@@ -24,7 +24,14 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.database import DATABASE_URL, SessionLocal
-from app.models import Transaction, TransactionDisposition, TransactionFlag, User
+from app.models import (
+    AgentRationale,
+    Transaction,
+    TransactionDisposition,
+    TransactionFlag,
+    User,
+)
+from app.rules.velocity import DEFAULT_MAX_COUNT, DEFAULT_WINDOW_MINUTES
 
 SEED = 42
 DAYS_OF_HISTORY = 95  # comfortably over the 90-day acceptance criterion
@@ -261,11 +268,23 @@ def generate_baseline(user_id: int, start_date: datetime) -> list[Transaction]:
 
 # --- PLANTED FRAUD SCENARIOS -------------------------------------------
 #
-# The four generators below insert rows that are deliberately implausible
-# against the baseline distributions above, so they'd be caught by
-# reasonable Sprint 2 rules-engine thresholds even though those thresholds
-# aren't finalized yet. Each generator returns (Transaction, reason) pairs
-# so main() can print a verification summary after inserting.
+# The six generators below insert rows that are deliberately implausible
+# against the baseline distributions above, so the rules engine flags them.
+# Each generator returns (Transaction, reason) pairs so main() can print a
+# verification summary after inserting; each reason says what that row
+# actually trips (tests/test_seed_transactions.py guards the velocity and
+# SCRUM-65 triple-rule plants over the full seed).
+
+
+# SCRUM-89: minutes after each cluster's start. Velocity (SCRUM-17/76) flags
+# a transaction when the 10-minute window ending at it, inclusive, holds more
+# than 5 transactions -- so each 6-charge burst fits inside 10 minutes (with
+# a minute of margin) and only its 6th charge flags, at a count of 6.
+VELOCITY_BURST_OFFSETS_MINUTES = [
+    [0, 1, 2, 3, 4, 5],
+    [0, 1, 3, 4, 6, 8],
+    [0, 2, 3, 5, 7, 9],
+]
 
 
 def generate_velocity_fraud(
@@ -273,26 +292,40 @@ def generate_velocity_fraud(
 ) -> list[tuple[Transaction, str]]:
     """Rule 1 — velocity: clusters of several transactions in a short window.
 
-    Simulates card-testing: a burst of small purchases at different
-    merchants within under an hour, on days otherwise unrelated to each
-    other. Three separate clusters, planted on different days.
+    Simulates card-testing: a burst of 6 small purchases at different
+    merchants within 10 minutes, on days otherwise unrelated to each other.
+    Three separate clusters, planted on different days, at the
+    VELOCITY_BURST_OFFSETS_MINUTES above. Only each cluster's 6th charge
+    flags: the 5 before it see a window of at most 5 transactions.
     """
     results = []
     burst_days = [12, 41, 77]
     for cluster_index, day_offset in enumerate(burst_days):
         day = start_date + timedelta(days=day_offset)
         cluster_start = random_timestamp(day)
-        for i in range(6):
-            ts = cluster_start + timedelta(minutes=i * random.randint(3, 8))
+        offsets = VELOCITY_BURST_OFFSETS_MINUTES[cluster_index]
+        for i, offset in enumerate(offsets):
+            # SCRUM-89: discarded, but kept so every later random draw -- and
+            # with it every other planted row, SCRUM-65's Meridian included --
+            # is unchanged from before these offsets replaced the old
+            # i * randint(3, 8) spacing.
+            random.randint(3, 8)
+            ts = cluster_start + timedelta(minutes=offset)
             category = random.choice(["shopping", "gas_transport", "entertainment"])
             merchant = f"QuickPay Test Merchant {cluster_index + 1}-{i + 1}"
             amount = Decimal(str(round(random.uniform(4, 30), 2)))
             tx = make_transaction(
                 user_id, ts, merchant, category, amount, jittered_home_location()
             )
-            results.append(
-                (tx, f"velocity cluster #{cluster_index + 1}: 6 charges within ~30 min")
+            reason = (
+                f"velocity cluster #{cluster_index + 1}: charge {i + 1} of "
+                f"{len(offsets)} within {offsets[-1]} min"
             )
+            if i + 1 > DEFAULT_MAX_COUNT:
+                reason += (
+                    f" -- trips velocity ({i + 1} in {DEFAULT_WINDOW_MINUTES} min)"
+                )
+            results.append((tx, reason))
     return results
 
 
@@ -363,14 +396,20 @@ def generate_new_merchant_fraud(
     """Rule 4 — new-merchant risk: first-time merchant at an above-typical
     first-purchase amount. These merchant names never appear in baseline
     data, so they're guaranteed first-time-for-this-user by construction.
+
+    Precision Optics and Riverside Wellness also trip amount deviation.
+    Nordic Home Furnishings trips nothing (SCRUM-89): it lands after the
+    multi-rule plant's $2150 first purchase, which inflates the stdev of
+    both its first-purchase history and its shopping category, leaving it
+    about 2.2 and 1.6 stdevs above those means against a threshold of 3.
     """
     results = []
     plants = [
-        (22, "shopping", "Precision Optics Co.", Decimal("610.00")),
-        (55, "health", "Riverside Wellness Spa", Decimal("340.00")),
-        (91, "shopping", "Nordic Home Furnishings", Decimal("780.00")),
+        (22, "shopping", "Precision Optics Co.", Decimal("610.00"), True),
+        (55, "health", "Riverside Wellness Spa", Decimal("340.00"), True),
+        (91, "shopping", "Nordic Home Furnishings", Decimal("780.00"), False),
     ]
-    for day_offset, category, merchant, amount in plants:
+    for day_offset, category, merchant, amount, trips in plants:
         day = start_date + timedelta(days=day_offset)
         tx = make_transaction(
             user_id,
@@ -380,11 +419,13 @@ def generate_new_merchant_fraud(
             amount,
             jittered_home_location(),
         )
+        outcome = (
+            "trips new merchant and amount deviation"
+            if trips
+            else "trips no rule (see docstring)"
+        )
         results.append(
-            (
-                tx,
-                f"new merchant: first-ever charge from {merchant!r} at above-typical amount",
-            )
+            (tx, f"new merchant: first-ever charge from {merchant!r} -- {outcome}")
         )
     return results
 
@@ -445,6 +486,29 @@ def generate_triple_rule_fraud(
     ]
 
 
+def generate_dataset(
+    user_id: int, start_date: datetime
+) -> tuple[list[Transaction], list[tuple[str, list[tuple[Transaction, str]]]]]:
+    """The full dataset -- baseline plus every planted scenario, grouped by
+    label -- built in memory without touching the database.
+
+    Re-seeds the random generator itself, so every call with the same
+    arguments returns the same rows. SCRUM-89: factored out of main() so
+    tests can run the rules engine over exactly what the seed inserts.
+    """
+    random.seed(SEED)
+    baseline = generate_baseline(user_id, start_date)
+    fraud_groups: list[tuple[str, list[tuple[Transaction, str]]]] = [
+        ("velocity", generate_velocity_fraud(user_id, start_date)),
+        ("geographic anomaly", generate_geo_anomaly_fraud(user_id, start_date)),
+        ("amount deviation", generate_amount_deviation_fraud(user_id, start_date)),
+        ("new merchant", generate_new_merchant_fraud(user_id, start_date)),
+        ("multi-rule", generate_multi_rule_fraud(user_id, start_date)),
+        ("triple-rule", generate_triple_rule_fraud(user_id, start_date)),
+    ]
+    return baseline, fraud_groups
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -453,7 +517,6 @@ def main() -> None:
     args = parser.parse_args()
 
     confirm_dev_database(skip_prompt=args.yes)
-    random.seed(SEED)
 
     db = SessionLocal()
     try:
@@ -477,6 +540,18 @@ def main() -> None:
                 db.query(Transaction.id).filter(Transaction.user_id == user.id)
             )
         ).delete(synchronize_session=False)
+        # SCRUM-89: same FK constraint again. agent_rationales is append-only
+        # by convention too, but its rows are a cache keyed on the
+        # transaction id (inside the fact fingerprint), and every reseed
+        # assigns new ids -- so a reseed orphans them all anyway. This one
+        # delete covers retry attempts as well: each attempt, pass or fail,
+        # is its own row here. The live baseline is kept in the repo
+        # (tests/fixtures/live_rationales_baseline.json), not only in these rows.
+        db.query(AgentRationale).filter(
+            AgentRationale.transaction_id.in_(
+                db.query(Transaction.id).filter(Transaction.user_id == user.id)
+            )
+        ).delete(synchronize_session=False)
         deleted = (
             db.query(Transaction)
             .filter(Transaction.user_id == user.id)
@@ -487,16 +562,7 @@ def main() -> None:
             hour=0, minute=0, second=0, microsecond=0
         ) - timedelta(days=DAYS_OF_HISTORY - 1)
 
-        baseline = generate_baseline(user.id, start_date)
-
-        fraud_groups: list[tuple[str, list[tuple[Transaction, str]]]] = [
-            ("velocity", generate_velocity_fraud(user.id, start_date)),
-            ("geographic anomaly", generate_geo_anomaly_fraud(user.id, start_date)),
-            ("amount deviation", generate_amount_deviation_fraud(user.id, start_date)),
-            ("new merchant", generate_new_merchant_fraud(user.id, start_date)),
-            ("multi-rule", generate_multi_rule_fraud(user.id, start_date)),
-            ("triple-rule", generate_triple_rule_fraud(user.id, start_date)),
-        ]
+        baseline, fraud_groups = generate_dataset(user.id, start_date)
 
         db.add_all(baseline)
         for _, rows in fraud_groups:
