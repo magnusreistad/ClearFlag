@@ -6,7 +6,8 @@ seeded user, with a handful of deliberately planted fraud scenarios mixed in
 flag. Every plant trips the rule it targets at the engine's current
 thresholds, except the one new-merchant plant its reason line says doesn't.
 
-Idempotent: re-running clears this user's existing transactions first, so
+Idempotent: re-running clears this user's existing transactions first --
+with their flags, dispositions and agent rationales, which reference them -- so
 you always end up with exactly one clean generated dataset, not duplicates.
 Uses a fixed random seed, so the dataset is reproducible.
 
@@ -23,7 +24,13 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.database import DATABASE_URL, SessionLocal
-from app.models import Transaction, TransactionDisposition, TransactionFlag, User
+from app.models import (
+    AgentRationale,
+    Transaction,
+    TransactionDisposition,
+    TransactionFlag,
+    User,
+)
 from app.rules.velocity import DEFAULT_MAX_COUNT, DEFAULT_WINDOW_MINUTES
 
 SEED = 42
@@ -530,6 +537,18 @@ def main() -> None:
         # regenerate-everything script does, explicitly.
         db.query(TransactionDisposition).filter(
             TransactionDisposition.transaction_id.in_(
+                db.query(Transaction.id).filter(Transaction.user_id == user.id)
+            )
+        ).delete(synchronize_session=False)
+        # SCRUM-89: same FK constraint again. agent_rationales is append-only
+        # by convention too, but its rows are a cache keyed on the
+        # transaction id (inside the fact fingerprint), and every reseed
+        # assigns new ids -- so a reseed orphans them all anyway. This one
+        # delete covers retry attempts as well: each attempt, pass or fail,
+        # is its own row here. The live baseline is kept in the repo
+        # (tests/fixtures/live_rationales_baseline.json), not only in these rows.
+        db.query(AgentRationale).filter(
+            AgentRationale.transaction_id.in_(
                 db.query(Transaction.id).filter(Transaction.user_id == user.id)
             )
         ).delete(synchronize_session=False)

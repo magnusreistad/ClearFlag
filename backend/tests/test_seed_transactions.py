@@ -1,8 +1,12 @@
+import sys
 from datetime import UTC, datetime
+from decimal import Decimal
 
-from app.models import Transaction
+from app.database import SessionLocal
+from app.models import AgentRationale, Transaction, User
 from app.rules.engine import evaluate_all_rules, rule_names_by_transaction
-from scripts.seed_transactions import generate_dataset
+from scripts import seed_transactions
+from scripts.seed_transactions import SEED_USER_NAME, generate_dataset
 
 START_DATE = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -37,3 +41,62 @@ def test_seed_triple_rule_plant_still_trips_its_three_rules():
         "amount_deviation",
         "new_merchant_risk",
     ]
+
+
+def run_seed(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["seed_transactions", "--yes"])
+    seed_transactions.main()
+
+
+def add_rationale(db, transaction_id: int) -> None:
+    db.add(
+        AgentRationale(
+            transaction_id=transaction_id,
+            fact_fingerprint="fingerprint",
+            prompt_version="v1",
+            model_id="mock",
+            validation_passed=False,
+            violations=[],
+        )
+    )
+
+
+def test_reseed_succeeds_when_the_user_has_agent_rationales(monkeypatch):
+    """SCRUM-89: agent_rationales.transaction_id has no ON DELETE CASCADE, so
+    a reseed used to fail with a ForeignKeyViolation once compose_rationales
+    had written any row (pass or fail) for the seeded user. Another user's
+    rationales must survive it."""
+    run_seed(monkeypatch)
+
+    db = SessionLocal()
+    seeded = db.query(Transaction).join(User).filter(User.name == SEED_USER_NAME)
+    add_rationale(db, seeded.first().id)
+    other_user = User(name="Other User")
+    db.add(other_user)
+    db.flush()
+    other_transaction = Transaction(
+        user_id=other_user.id,
+        timestamp=START_DATE,
+        merchant="Other Merchant",
+        category="groceries",
+        amount=Decimal("10.00"),
+        latitude=47.6062,
+        longitude=-122.3321,
+        location_label="Seattle, WA",
+    )
+    db.add(other_transaction)
+    db.flush()
+    other_user_id, other_transaction_id = other_user.id, other_transaction.id
+    add_rationale(db, other_transaction_id)
+    db.commit()
+    db.close()
+
+    run_seed(monkeypatch)
+
+    db = SessionLocal()
+    remaining = [r.transaction_id for r in db.query(AgentRationale).all()]
+    assert remaining == [other_transaction_id]
+    assert (
+        db.query(Transaction).filter(Transaction.user_id == other_user_id).count() == 1
+    )
+    db.close()
