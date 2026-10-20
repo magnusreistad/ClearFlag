@@ -48,3 +48,19 @@ export function formatGroupHeading(key: string): string {
 export function formatCategory(category: string): string {
   return category.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
+
+const percentFormatter = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 1 })
+// timeZone UTC: summary week starts are plain 'YYYY-MM-DD' dates in UTC, and
+// formatting them in local time would show the day before west of UTC.
+const weekFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+
+// "62.5%", or an em dash for a ratio the backend sends as null (no
+// judgments yet, or nothing flagged) - never "0%", which would claim a value.
+export function formatRatio(ratio: number | null): string {
+  return ratio === null ? '—' : percentFormatter.format(ratio)
+}
+
+// "Jul 13" for a summary trend week_start.
+export function formatWeek(weekStart: string): string {
+  return weekFormatter.format(new Date(`${weekStart}T00:00:00Z`))
+}
