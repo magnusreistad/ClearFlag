@@ -268,6 +268,17 @@ def generate_baseline(user_id: int, start_date: datetime) -> list[Transaction]:
 # so main() can print a verification summary after inserting.
 
 
+# SCRUM-89: minutes after each cluster's start. Velocity (SCRUM-17/76) flags
+# a transaction when the 10-minute window ending at it, inclusive, holds more
+# than 5 transactions -- so each 6-charge burst fits inside 10 minutes (with
+# a minute of margin) and only its 6th charge flags, at a count of 6.
+VELOCITY_BURST_OFFSETS_MINUTES = [
+    [0, 1, 2, 3, 4, 5],
+    [0, 1, 3, 4, 6, 8],
+    [0, 2, 3, 5, 7, 9],
+]
+
+
 def generate_velocity_fraud(
     user_id: int, start_date: datetime
 ) -> list[tuple[Transaction, str]]:
@@ -282,8 +293,13 @@ def generate_velocity_fraud(
     for cluster_index, day_offset in enumerate(burst_days):
         day = start_date + timedelta(days=day_offset)
         cluster_start = random_timestamp(day)
-        for i in range(6):
-            ts = cluster_start + timedelta(minutes=i * random.randint(3, 8))
+        for i, offset in enumerate(VELOCITY_BURST_OFFSETS_MINUTES[cluster_index]):
+            # SCRUM-89: discarded, but kept so every later random draw -- and
+            # with it every other planted row, SCRUM-65's Meridian included --
+            # is unchanged from before these offsets replaced the old
+            # i * randint(3, 8) spacing.
+            random.randint(3, 8)
+            ts = cluster_start + timedelta(minutes=offset)
             category = random.choice(["shopping", "gas_transport", "entertainment"])
             merchant = f"QuickPay Test Merchant {cluster_index + 1}-{i + 1}"
             amount = Decimal(str(round(random.uniform(4, 30), 2)))
