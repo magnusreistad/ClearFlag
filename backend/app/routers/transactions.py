@@ -2,7 +2,7 @@ import logging
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import tuple_
+from sqlalchemy import Date, and_, func, literal_column, select, tuple_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -12,12 +12,14 @@ from app.investigation_agent.payload import build_payload
 from app.investigation_agent.prompts import PROMPT_VERSION
 from app.investigation_agent.state import TransactionData, transaction_data_from_orm
 from app.models import (
+    DISPOSITION_VALUES,
     AgentRationale,
     Transaction,
     TransactionDisposition,
     TransactionFlag,
 )
 from app.rules.engine import (
+    FlagHit,
     concatenate_rationales,
     evaluate_all_rules,
     rule_names_by_transaction,
@@ -25,10 +27,14 @@ from app.rules.engine import (
 )
 from app.schemas import (
     CurrentDisposition,
+    DispositionCounts,
     DispositionIn,
     DispositionOut,
+    SummaryResponse,
     TransactionListResponse,
     TransactionOut,
+    TrendBucket,
+    UnflaggedDispositionCounts,
 )
 
 router = APIRouter()
@@ -118,27 +124,36 @@ def _lookup_agent_rationales(
     }
 
 
-def _refresh_flags(
+def _persist_flags(
     db: Session, user_id: int
-) -> tuple[dict[int, str], dict[int, list[str]]]:
+) -> tuple[list[FlagHit], dict[int, TransactionData]]:
     """Re-run the rules engine over a user's full transaction history and
-    replace their persisted flags with the fresh result.
+    replace their persisted flags with the fresh result. Returns the hits
+    and, for each flagged transaction, its TransactionData.
 
     SCRUM-61 MVP tradeoff: none of the four rules are incremental (each
-    needs the user's full history to evaluate correctly), and this GET
-    endpoint is the only write trigger this schema has, so every call
-    recomputes and persists flags for the user's entire history, not just
-    the requested page. That's an unusual side effect for a GET, but fine
-    at this project's synthetic-data scale -- a real system would move this
+    needs the user's full history to evaluate correctly), and GET requests
+    are the only write trigger this schema has, so every call recomputes
+    and persists flags for the user's entire history, not just the
+    requested page. That's an unusual side effect for a GET, but fine at
+    this project's synthetic-data scale -- a real system would move this
     to a background job instead of a request-time recompute.
 
-    SCRUM-53 Phase B: the agent_rationales lookup below is deliberately
-    OUTSIDE the `with _flags_refresh_lock` block -- it's a read against a
-    different table, doesn't participate in the TransactionFlag
-    delete/reinsert this lock protects, and doesn't need to be serialized
-    against a concurrent request. `flagged_transaction_data` is captured
-    *inside* the lock, before db.commit() expires `all_transactions`'
-    attributes, specifically so the lookup can run afterward without
+    SCRUM-32 freshness: both GET /transactions (via _refresh_flags) and GET
+    /transactions/summary call this first, so the summary aggregates the
+    same flag set the feed shows -- one function over the same rows, not
+    two definitions of "flagged". The summary then aggregates in SQL over
+    the transaction_flags rows written here (the same rows POST
+    .../disposition reads), rather than over in-memory hits. Reading the
+    persisted flags WITHOUT refreshing would be cheaper but stale until
+    the feed next loaded (after a reseed, or a rule change). The two
+    endpoints only disagree if a user's transactions change between the
+    two requests, which nothing in the app does today. Both serialize on
+    _flags_refresh_lock, which is per-process only.
+
+    `flagged_transaction_data` is captured *inside* the lock, before
+    db.commit() expires `all_transactions`' attributes, specifically so
+    _refresh_flags' agent_rationales lookup can run afterward without
     triggering a lazy-refresh SELECT per transaction.
     """
     with _flags_refresh_lock:
@@ -146,14 +161,12 @@ def _refresh_flags(
             db.query(Transaction).filter(Transaction.user_id == user_id).all()
         )
         hits = evaluate_all_rules(all_transactions)
-        rule_names_by_id = rule_names_by_transaction(hits)
-        rule_values_by_id = rule_values_by_transaction(hits)
         transactions_by_id = {t.id: t for t in all_transactions}
         flagged_transaction_data = {
             transaction_id: transaction_data_from_orm(
                 transactions_by_id[transaction_id]
             )
-            for transaction_id in rule_names_by_id
+            for transaction_id in rule_names_by_transaction(hits)
         }
 
         transaction_ids = [t.id for t in all_transactions]
@@ -170,7 +183,25 @@ def _refresh_flags(
         )
         db.commit()
 
-        interim_rationale_by_id = concatenate_rationales(hits)
+    return hits, flagged_transaction_data
+
+
+def _refresh_flags(
+    db: Session, user_id: int
+) -> tuple[dict[int, str], dict[int, list[str]]]:
+    """Persist a user's fresh flags (_persist_flags), then build the feed's
+    rationale for each flagged transaction.
+
+    SCRUM-53 Phase B: the agent_rationales lookup below is deliberately
+    OUTSIDE _persist_flags' lock -- it's a read against a different table,
+    doesn't participate in the TransactionFlag delete/reinsert that lock
+    protects, and doesn't need to be serialized against a concurrent
+    request.
+    """
+    hits, flagged_transaction_data = _persist_flags(db, user_id)
+    rule_names_by_id = rule_names_by_transaction(hits)
+    rule_values_by_id = rule_values_by_transaction(hits)
+    interim_rationale_by_id = concatenate_rationales(hits)
 
     agent_rationale_by_id = _lookup_agent_rationales(
         db, flagged_transaction_data, rule_names_by_id, rule_values_by_id
@@ -268,6 +299,156 @@ def list_transactions(
         limit=limit,
         offset=offset,
     )
+
+
+def _summarize(db: Session, user_id: int) -> SummaryResponse:
+    """SCRUM-32. Every count in the summary, aggregated in SQL over the
+    user's persisted flags (callers refresh them first -- see
+    _persist_flags) and each transaction's latest disposition. Two
+    statements: the totals, then the weekly trend.
+
+    Disposition counts, judged_count, fp_rate and coverage cover CURRENTLY
+    flagged transactions only; a latest disposition on a transaction that
+    is no longer flagged is counted in unflagged_dispositions instead.
+    """
+    user_transactions = (
+        select(Transaction.id, Transaction.timestamp)
+        .where(Transaction.user_id == user_id)
+        .cte("user_transactions")
+    )
+    # One row per flagged transaction, with how many rules fired on it.
+    flagged = (
+        select(TransactionFlag.transaction_id, func.count().label("hits"))
+        .join(
+            user_transactions, user_transactions.c.id == TransactionFlag.transaction_id
+        )
+        .group_by(TransactionFlag.transaction_id)
+        .cte("flagged")
+    )
+    # Same DISTINCT ON ordering as _current_dispositions (and
+    # ix_transaction_dispositions_transaction_latest).
+    latest = (
+        select(
+            TransactionDisposition.transaction_id, TransactionDisposition.disposition
+        )
+        .join(
+            user_transactions,
+            user_transactions.c.id == TransactionDisposition.transaction_id,
+        )
+        .order_by(
+            TransactionDisposition.transaction_id,
+            TransactionDisposition.created_at.desc(),
+            TransactionDisposition.id.desc(),
+        )
+        .distinct(TransactionDisposition.transaction_id)
+        .cte("latest")
+    )
+    rows = (
+        select(
+            user_transactions.c.timestamp,
+            flagged.c.hits,
+            latest.c.disposition,
+        )
+        .select_from(user_transactions)
+        .outerjoin(flagged, flagged.c.transaction_id == user_transactions.c.id)
+        .outerjoin(latest, latest.c.transaction_id == user_transactions.c.id)
+        .cte("summary_rows")
+    )
+    is_flagged = rows.c.hits.is_not(None)
+
+    def count_where(*conditions):
+        return func.count().filter(and_(*conditions))
+
+    # Every per-disposition count is also gated on is_flagged, which keeps
+    # the trend's zero-filled weeks (all-NULL rows from the outer join)
+    # from counting as "unreviewed".
+    def disposition_columns():
+        return [
+            *(
+                count_where(is_flagged, rows.c.disposition == value).label(value)
+                for value in DISPOSITION_VALUES
+            ),
+            count_where(is_flagged, rows.c.disposition.is_(None)).label("unreviewed"),
+        ]
+
+    totals = db.execute(
+        select(
+            count_where(is_flagged).label("flagged"),
+            func.coalesce(func.sum(rows.c.hits), 0).label("rule_hits"),
+            *disposition_columns(),
+            *(
+                count_where(rows.c.hits.is_(None), rows.c.disposition == value).label(
+                    f"unflagged_{value}"
+                )
+                for value in DISPOSITION_VALUES
+            ),
+        )
+    ).one()
+
+    # ISO weeks (date_trunc('week') starts on Monday) in UTC, from the
+    # user's first transaction to their last. generate_series yields no
+    # rows for a user with no transactions (min/max are NULL).
+    def week_of(timestamp):
+        return func.date_trunc("week", func.timezone("UTC", timestamp))
+
+    weeks = select(
+        func.generate_series(
+            week_of(func.min(user_transactions.c.timestamp)),
+            week_of(func.max(user_transactions.c.timestamp)),
+            literal_column("interval '1 week'"),
+        ).label("week_start")
+    ).cte("weeks")
+    trend = db.execute(
+        select(
+            weeks.c.week_start.cast(Date).label("week_start"),
+            count_where(is_flagged).label("flagged"),
+            *disposition_columns(),
+        )
+        .select_from(weeks)
+        .outerjoin(rows, week_of(rows.c.timestamp) == weeks.c.week_start)
+        .group_by(weeks.c.week_start)
+        .order_by(weeks.c.week_start)
+    ).all()
+
+    judged = totals.confirmed_fraud + totals.false_positive + totals.ignored
+    fp_denominator = totals.false_positive + totals.confirmed_fraud
+    return SummaryResponse(
+        flagged_count=totals.flagged,
+        rule_hit_count=totals.rule_hits,
+        dispositions=DispositionCounts(
+            confirmed_fraud=totals.confirmed_fraud,
+            false_positive=totals.false_positive,
+            ignored=totals.ignored,
+            unreviewed=totals.unreviewed,
+        ),
+        judged_count=judged,
+        fp_rate=totals.false_positive / fp_denominator if fp_denominator else None,
+        coverage=judged / totals.flagged if totals.flagged else None,
+        unflagged_dispositions=UnflaggedDispositionCounts(
+            confirmed_fraud=totals.unflagged_confirmed_fraud,
+            false_positive=totals.unflagged_false_positive,
+            ignored=totals.unflagged_ignored,
+        ),
+        trend=[TrendBucket.model_validate(row, from_attributes=True) for row in trend],
+    )
+
+
+# Route order: this must stay declared before any future GET
+# /transactions/{transaction_id}, or "summary" would be matched as an id
+# (and 422 as a non-integer). Starlette matches routes in declaration order.
+@router.get("/transactions/summary", response_model=SummaryResponse)
+def get_summary(
+    user_id: int = Query(
+        ..., description="Scope the summary to this user's transactions"
+    ),
+    db: Session = Depends(get_db),
+) -> SummaryResponse:
+    """SCRUM-32. Refreshes the user's flags through the same path as GET
+    /transactions (_persist_flags -- see its docstring for why), then
+    aggregates in SQL. Skips the agent-rationale lookup the feed does:
+    the summary never shows a rationale."""
+    _persist_flags(db, user_id)
+    return _summarize(db, user_id)
 
 
 @router.post(

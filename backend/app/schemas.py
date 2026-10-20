@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -62,6 +62,60 @@ class DispositionIn(BaseModel):
         # rather than as a string a reader would have to strip to discover
         # is empty. A real note is stored exactly as written.
         return note if note and note.strip() else None
+
+
+class DispositionCounts(BaseModel):
+    """SCRUM-32. Currently flagged transactions by their latest
+    disposition; the four counts sum to SummaryResponse.flagged_count."""
+
+    confirmed_fraud: int
+    false_positive: int
+    ignored: int
+    unreviewed: int
+
+
+class UnflaggedDispositionCounts(BaseModel):
+    """SCRUM-32. Latest dispositions on transactions that are no longer
+    flagged -- the judgment happened, but it's outside the current flag
+    set, so it's kept out of fp_rate and coverage."""
+
+    confirmed_fraud: int
+    false_positive: int
+    ignored: int
+
+
+class TrendBucket(BaseModel):
+    """SCRUM-32. One ISO week (Monday start, UTC) of currently flagged
+    transactions, bucketed by transactions.timestamp. The four disposition
+    counts sum to `flagged`."""
+
+    week_start: date
+    flagged: int
+    confirmed_fraud: int
+    false_positive: int
+    ignored: int
+    unreviewed: int
+
+
+class SummaryResponse(BaseModel):
+    """Body of GET /transactions/summary (SCRUM-32)."""
+
+    # Distinct flagged transactions, vs. rule_hit_count's flag rows (one
+    # per rule that fired, so a transaction can count more than once).
+    flagged_count: int
+    rule_hit_count: int
+    dispositions: DispositionCounts
+    # Flagged transactions with any latest disposition, ignored included.
+    judged_count: int
+    # false_positive / (false_positive + confirmed_fraud) over currently
+    # flagged transactions; None (not 0) when neither has been recorded.
+    fp_rate: float | None
+    # judged_count / flagged_count; None when nothing is flagged.
+    coverage: float | None
+    unflagged_dispositions: UnflaggedDispositionCounts
+    # Every week from the user's first transaction to their last,
+    # zero-filled; empty only when the user has no transactions.
+    trend: list[TrendBucket]
 
 
 class DispositionOut(BaseModel):
