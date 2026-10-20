@@ -2,7 +2,7 @@ import logging
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import tuple_
+from sqlalchemy import Date, and_, func, literal_column, select, tuple_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,7 @@ from app.investigation_agent.payload import build_payload
 from app.investigation_agent.prompts import PROMPT_VERSION
 from app.investigation_agent.state import TransactionData, transaction_data_from_orm
 from app.models import (
+    DISPOSITION_VALUES,
     AgentRationale,
     Transaction,
     TransactionDisposition,
@@ -26,10 +27,14 @@ from app.rules.engine import (
 )
 from app.schemas import (
     CurrentDisposition,
+    DispositionCounts,
     DispositionIn,
     DispositionOut,
+    SummaryResponse,
     TransactionListResponse,
     TransactionOut,
+    TrendBucket,
+    UnflaggedDispositionCounts,
 )
 
 router = APIRouter()
@@ -294,6 +299,156 @@ def list_transactions(
         limit=limit,
         offset=offset,
     )
+
+
+def _summarize(db: Session, user_id: int) -> SummaryResponse:
+    """SCRUM-32. Every count in the summary, aggregated in SQL over the
+    user's persisted flags (callers refresh them first -- see
+    _persist_flags) and each transaction's latest disposition. Two
+    statements: the totals, then the weekly trend.
+
+    Disposition counts, judged_count, fp_rate and coverage cover CURRENTLY
+    flagged transactions only; a latest disposition on a transaction that
+    is no longer flagged is counted in unflagged_dispositions instead.
+    """
+    user_transactions = (
+        select(Transaction.id, Transaction.timestamp)
+        .where(Transaction.user_id == user_id)
+        .cte("user_transactions")
+    )
+    # One row per flagged transaction, with how many rules fired on it.
+    flagged = (
+        select(TransactionFlag.transaction_id, func.count().label("hits"))
+        .join(
+            user_transactions, user_transactions.c.id == TransactionFlag.transaction_id
+        )
+        .group_by(TransactionFlag.transaction_id)
+        .cte("flagged")
+    )
+    # Same DISTINCT ON ordering as _current_dispositions (and
+    # ix_transaction_dispositions_transaction_latest).
+    latest = (
+        select(
+            TransactionDisposition.transaction_id, TransactionDisposition.disposition
+        )
+        .join(
+            user_transactions,
+            user_transactions.c.id == TransactionDisposition.transaction_id,
+        )
+        .order_by(
+            TransactionDisposition.transaction_id,
+            TransactionDisposition.created_at.desc(),
+            TransactionDisposition.id.desc(),
+        )
+        .distinct(TransactionDisposition.transaction_id)
+        .cte("latest")
+    )
+    rows = (
+        select(
+            user_transactions.c.timestamp,
+            flagged.c.hits,
+            latest.c.disposition,
+        )
+        .select_from(user_transactions)
+        .outerjoin(flagged, flagged.c.transaction_id == user_transactions.c.id)
+        .outerjoin(latest, latest.c.transaction_id == user_transactions.c.id)
+        .cte("summary_rows")
+    )
+    is_flagged = rows.c.hits.is_not(None)
+
+    def count_where(*conditions):
+        return func.count().filter(and_(*conditions))
+
+    # Every per-disposition count is also gated on is_flagged, which keeps
+    # the trend's zero-filled weeks (all-NULL rows from the outer join)
+    # from counting as "unreviewed".
+    def disposition_columns():
+        return [
+            *(
+                count_where(is_flagged, rows.c.disposition == value).label(value)
+                for value in DISPOSITION_VALUES
+            ),
+            count_where(is_flagged, rows.c.disposition.is_(None)).label("unreviewed"),
+        ]
+
+    totals = db.execute(
+        select(
+            count_where(is_flagged).label("flagged"),
+            func.coalesce(func.sum(rows.c.hits), 0).label("rule_hits"),
+            *disposition_columns(),
+            *(
+                count_where(rows.c.hits.is_(None), rows.c.disposition == value).label(
+                    f"unflagged_{value}"
+                )
+                for value in DISPOSITION_VALUES
+            ),
+        )
+    ).one()
+
+    # ISO weeks (date_trunc('week') starts on Monday) in UTC, from the
+    # user's first transaction to their last. generate_series yields no
+    # rows for a user with no transactions (min/max are NULL).
+    def week_of(timestamp):
+        return func.date_trunc("week", func.timezone("UTC", timestamp))
+
+    weeks = select(
+        func.generate_series(
+            week_of(func.min(user_transactions.c.timestamp)),
+            week_of(func.max(user_transactions.c.timestamp)),
+            literal_column("interval '1 week'"),
+        ).label("week_start")
+    ).cte("weeks")
+    trend = db.execute(
+        select(
+            weeks.c.week_start.cast(Date).label("week_start"),
+            count_where(is_flagged).label("flagged"),
+            *disposition_columns(),
+        )
+        .select_from(weeks)
+        .outerjoin(rows, week_of(rows.c.timestamp) == weeks.c.week_start)
+        .group_by(weeks.c.week_start)
+        .order_by(weeks.c.week_start)
+    ).all()
+
+    judged = totals.confirmed_fraud + totals.false_positive + totals.ignored
+    fp_denominator = totals.false_positive + totals.confirmed_fraud
+    return SummaryResponse(
+        flagged_count=totals.flagged,
+        rule_hit_count=totals.rule_hits,
+        dispositions=DispositionCounts(
+            confirmed_fraud=totals.confirmed_fraud,
+            false_positive=totals.false_positive,
+            ignored=totals.ignored,
+            unreviewed=totals.unreviewed,
+        ),
+        judged_count=judged,
+        fp_rate=totals.false_positive / fp_denominator if fp_denominator else None,
+        coverage=judged / totals.flagged if totals.flagged else None,
+        unflagged_dispositions=UnflaggedDispositionCounts(
+            confirmed_fraud=totals.unflagged_confirmed_fraud,
+            false_positive=totals.unflagged_false_positive,
+            ignored=totals.unflagged_ignored,
+        ),
+        trend=[TrendBucket.model_validate(row, from_attributes=True) for row in trend],
+    )
+
+
+# Route order: this must stay declared before any future GET
+# /transactions/{transaction_id}, or "summary" would be matched as an id
+# (and 422 as a non-integer). Starlette matches routes in declaration order.
+@router.get("/transactions/summary", response_model=SummaryResponse)
+def get_summary(
+    user_id: int = Query(
+        ..., description="Scope the summary to this user's transactions"
+    ),
+    db: Session = Depends(get_db),
+) -> SummaryResponse:
+    """SCRUM-32. Refreshes the user's flags through the same path as GET
+    /transactions (_persist_flags -- see its docstring for why), then
+    aggregates in SQL. Skips the agent-rationale lookup the feed does:
+    the summary never shows a rationale."""
+    _persist_flags(db, user_id)
+    return _summarize(db, user_id)
 
 
 @router.post(
