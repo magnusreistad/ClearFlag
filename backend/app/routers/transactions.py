@@ -18,6 +18,7 @@ from app.models import (
     TransactionFlag,
 )
 from app.rules.engine import (
+    FlagHit,
     concatenate_rationales,
     evaluate_all_rules,
     rule_names_by_transaction,
@@ -118,27 +119,36 @@ def _lookup_agent_rationales(
     }
 
 
-def _refresh_flags(
+def _persist_flags(
     db: Session, user_id: int
-) -> tuple[dict[int, str], dict[int, list[str]]]:
+) -> tuple[list[FlagHit], dict[int, TransactionData]]:
     """Re-run the rules engine over a user's full transaction history and
-    replace their persisted flags with the fresh result.
+    replace their persisted flags with the fresh result. Returns the hits
+    and, for each flagged transaction, its TransactionData.
 
     SCRUM-61 MVP tradeoff: none of the four rules are incremental (each
-    needs the user's full history to evaluate correctly), and this GET
-    endpoint is the only write trigger this schema has, so every call
-    recomputes and persists flags for the user's entire history, not just
-    the requested page. That's an unusual side effect for a GET, but fine
-    at this project's synthetic-data scale -- a real system would move this
+    needs the user's full history to evaluate correctly), and GET requests
+    are the only write trigger this schema has, so every call recomputes
+    and persists flags for the user's entire history, not just the
+    requested page. That's an unusual side effect for a GET, but fine at
+    this project's synthetic-data scale -- a real system would move this
     to a background job instead of a request-time recompute.
 
-    SCRUM-53 Phase B: the agent_rationales lookup below is deliberately
-    OUTSIDE the `with _flags_refresh_lock` block -- it's a read against a
-    different table, doesn't participate in the TransactionFlag
-    delete/reinsert this lock protects, and doesn't need to be serialized
-    against a concurrent request. `flagged_transaction_data` is captured
-    *inside* the lock, before db.commit() expires `all_transactions`'
-    attributes, specifically so the lookup can run afterward without
+    SCRUM-32 freshness: both GET /transactions (via _refresh_flags) and GET
+    /transactions/summary call this first, so the summary aggregates the
+    same flag set the feed shows -- one function over the same rows, not
+    two definitions of "flagged". The summary then aggregates in SQL over
+    the transaction_flags rows written here (the same rows POST
+    .../disposition reads), rather than over in-memory hits. Reading the
+    persisted flags WITHOUT refreshing would be cheaper but stale until
+    the feed next loaded (after a reseed, or a rule change). The two
+    endpoints only disagree if a user's transactions change between the
+    two requests, which nothing in the app does today. Both serialize on
+    _flags_refresh_lock, which is per-process only.
+
+    `flagged_transaction_data` is captured *inside* the lock, before
+    db.commit() expires `all_transactions`' attributes, specifically so
+    _refresh_flags' agent_rationales lookup can run afterward without
     triggering a lazy-refresh SELECT per transaction.
     """
     with _flags_refresh_lock:
@@ -146,14 +156,12 @@ def _refresh_flags(
             db.query(Transaction).filter(Transaction.user_id == user_id).all()
         )
         hits = evaluate_all_rules(all_transactions)
-        rule_names_by_id = rule_names_by_transaction(hits)
-        rule_values_by_id = rule_values_by_transaction(hits)
         transactions_by_id = {t.id: t for t in all_transactions}
         flagged_transaction_data = {
             transaction_id: transaction_data_from_orm(
                 transactions_by_id[transaction_id]
             )
-            for transaction_id in rule_names_by_id
+            for transaction_id in rule_names_by_transaction(hits)
         }
 
         transaction_ids = [t.id for t in all_transactions]
@@ -170,7 +178,25 @@ def _refresh_flags(
         )
         db.commit()
 
-        interim_rationale_by_id = concatenate_rationales(hits)
+    return hits, flagged_transaction_data
+
+
+def _refresh_flags(
+    db: Session, user_id: int
+) -> tuple[dict[int, str], dict[int, list[str]]]:
+    """Persist a user's fresh flags (_persist_flags), then build the feed's
+    rationale for each flagged transaction.
+
+    SCRUM-53 Phase B: the agent_rationales lookup below is deliberately
+    OUTSIDE _persist_flags' lock -- it's a read against a different table,
+    doesn't participate in the TransactionFlag delete/reinsert that lock
+    protects, and doesn't need to be serialized against a concurrent
+    request.
+    """
+    hits, flagged_transaction_data = _persist_flags(db, user_id)
+    rule_names_by_id = rule_names_by_transaction(hits)
+    rule_values_by_id = rule_values_by_transaction(hits)
+    interim_rationale_by_id = concatenate_rationales(hits)
 
     agent_rationale_by_id = _lookup_agent_rationales(
         db, flagged_transaction_data, rule_names_by_id, rule_values_by_id
