@@ -2,10 +2,9 @@
 
 Produces ~95 days of realistic, mostly-unremarkable spending for the single
 seeded user, with a handful of deliberately planted fraud scenarios mixed in
-(see PLANTED FRAUD SCENARIOS below). The Sprint 2 rules engine will consume
-this data; this script only needs the planted rows to be *distinct enough*
-from the baseline to be caught by reasonable thresholds later — exact
-thresholds are not decided yet.
+(see PLANTED FRAUD SCENARIOS below) for the rules engine (app/rules) to
+flag. Every plant trips the rule it targets at the engine's current
+thresholds, except the one new-merchant plant its reason line says doesn't.
 
 Idempotent: re-running clears this user's existing transactions first, so
 you always end up with exactly one clean generated dataset, not duplicates.
@@ -25,6 +24,7 @@ from decimal import Decimal
 
 from app.database import DATABASE_URL, SessionLocal
 from app.models import Transaction, TransactionDisposition, TransactionFlag, User
+from app.rules.velocity import DEFAULT_MAX_COUNT, DEFAULT_WINDOW_MINUTES
 
 SEED = 42
 DAYS_OF_HISTORY = 95  # comfortably over the 90-day acceptance criterion
@@ -261,11 +261,12 @@ def generate_baseline(user_id: int, start_date: datetime) -> list[Transaction]:
 
 # --- PLANTED FRAUD SCENARIOS -------------------------------------------
 #
-# The four generators below insert rows that are deliberately implausible
-# against the baseline distributions above, so they'd be caught by
-# reasonable Sprint 2 rules-engine thresholds even though those thresholds
-# aren't finalized yet. Each generator returns (Transaction, reason) pairs
-# so main() can print a verification summary after inserting.
+# The six generators below insert rows that are deliberately implausible
+# against the baseline distributions above, so the rules engine flags them.
+# Each generator returns (Transaction, reason) pairs so main() can print a
+# verification summary after inserting; each reason says what that row
+# actually trips (tests/test_seed_transactions.py guards the velocity and
+# SCRUM-65 triple-rule plants over the full seed).
 
 
 # SCRUM-89: minutes after each cluster's start. Velocity (SCRUM-17/76) flags
@@ -284,16 +285,19 @@ def generate_velocity_fraud(
 ) -> list[tuple[Transaction, str]]:
     """Rule 1 — velocity: clusters of several transactions in a short window.
 
-    Simulates card-testing: a burst of small purchases at different
-    merchants within under an hour, on days otherwise unrelated to each
-    other. Three separate clusters, planted on different days.
+    Simulates card-testing: a burst of 6 small purchases at different
+    merchants within 10 minutes, on days otherwise unrelated to each other.
+    Three separate clusters, planted on different days, at the
+    VELOCITY_BURST_OFFSETS_MINUTES above. Only each cluster's 6th charge
+    flags: the 5 before it see a window of at most 5 transactions.
     """
     results = []
     burst_days = [12, 41, 77]
     for cluster_index, day_offset in enumerate(burst_days):
         day = start_date + timedelta(days=day_offset)
         cluster_start = random_timestamp(day)
-        for i, offset in enumerate(VELOCITY_BURST_OFFSETS_MINUTES[cluster_index]):
+        offsets = VELOCITY_BURST_OFFSETS_MINUTES[cluster_index]
+        for i, offset in enumerate(offsets):
             # SCRUM-89: discarded, but kept so every later random draw -- and
             # with it every other planted row, SCRUM-65's Meridian included --
             # is unchanged from before these offsets replaced the old
@@ -306,9 +310,15 @@ def generate_velocity_fraud(
             tx = make_transaction(
                 user_id, ts, merchant, category, amount, jittered_home_location()
             )
-            results.append(
-                (tx, f"velocity cluster #{cluster_index + 1}: 6 charges within ~30 min")
+            reason = (
+                f"velocity cluster #{cluster_index + 1}: charge {i + 1} of "
+                f"{len(offsets)} within {offsets[-1]} min"
             )
+            if i + 1 > DEFAULT_MAX_COUNT:
+                reason += (
+                    f" -- trips velocity ({i + 1} in {DEFAULT_WINDOW_MINUTES} min)"
+                )
+            results.append((tx, reason))
     return results
 
 
@@ -379,14 +389,20 @@ def generate_new_merchant_fraud(
     """Rule 4 — new-merchant risk: first-time merchant at an above-typical
     first-purchase amount. These merchant names never appear in baseline
     data, so they're guaranteed first-time-for-this-user by construction.
+
+    Precision Optics and Riverside Wellness also trip amount deviation.
+    Nordic Home Furnishings trips nothing (SCRUM-89): it lands after the
+    multi-rule plant's $2150 first purchase, which inflates the stdev of
+    both its first-purchase history and its shopping category, leaving it
+    about 2.2 and 1.6 stdevs above those means against a threshold of 3.
     """
     results = []
     plants = [
-        (22, "shopping", "Precision Optics Co.", Decimal("610.00")),
-        (55, "health", "Riverside Wellness Spa", Decimal("340.00")),
-        (91, "shopping", "Nordic Home Furnishings", Decimal("780.00")),
+        (22, "shopping", "Precision Optics Co.", Decimal("610.00"), True),
+        (55, "health", "Riverside Wellness Spa", Decimal("340.00"), True),
+        (91, "shopping", "Nordic Home Furnishings", Decimal("780.00"), False),
     ]
-    for day_offset, category, merchant, amount in plants:
+    for day_offset, category, merchant, amount, trips in plants:
         day = start_date + timedelta(days=day_offset)
         tx = make_transaction(
             user_id,
@@ -396,11 +412,13 @@ def generate_new_merchant_fraud(
             amount,
             jittered_home_location(),
         )
+        outcome = (
+            "trips new merchant and amount deviation"
+            if trips
+            else "trips no rule (see docstring)"
+        )
         results.append(
-            (
-                tx,
-                f"new merchant: first-ever charge from {merchant!r} at above-typical amount",
-            )
+            (tx, f"new merchant: first-ever charge from {merchant!r} -- {outcome}")
         )
     return results
 
