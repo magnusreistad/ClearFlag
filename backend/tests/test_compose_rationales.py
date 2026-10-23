@@ -21,11 +21,18 @@ import logging
 import sys
 
 import pytest
-from agent_fixtures import UNGROUNDED_TEXT, add_amount_deviation_outlier, seed_scenario
+from agent_fixtures import (
+    LIVE_MODEL_ID,
+    UNGROUNDED_TEXT,
+    add_amount_deviation_outlier,
+    as_live_model,
+    seed_scenario,
+)
 from langchain_core.messages import AIMessage
 
 from app.database import SessionLocal as TestingSessionLocal
 from app.investigation_agent.fingerprint import compute_fact_fingerprint
+from app.investigation_agent.llm import MOCK_MODEL_ID
 from app.investigation_agent.payload import build_payload
 from app.investigation_agent.prompts import PROMPT_VERSION
 from app.investigation_agent.state import transaction_data_from_orm
@@ -236,7 +243,15 @@ class TestRetryCap:
     VALIDATOR_VERSION) budget key caps further composition -- but only
     validation failures consume that budget; composition_error attempts,
     and rows from a different budget key (a validator_version bump, or a
-    row with validator_version IS NULL), don't count."""
+    row with validator_version IS NULL), don't count.
+
+    SCRUM-91: every test here records its attempts under a live model_id --
+    mock attempts never count toward the budget, so a mock-mode cap test
+    would no longer be testing the cap (see TestMockAttemptsBudget)."""
+
+    @pytest.fixture(autouse=True)
+    def _live_model(self, monkeypatch):
+        as_live_model(monkeypatch)
 
     def test_cap_skips_the_third_attempt_without_calling_the_model(
         self, monkeypatch, caplog, scripted_llm
@@ -477,6 +492,82 @@ class TestRetryCap:
         assert "outcome=passed" in caplog.text
         assert f"transaction={capped_id}" in caplog.text
         assert "outcome=skipped_capped" in caplog.text
+
+
+class TestMockAttemptsBudget:
+    """SCRUM-91: mock-mode attempts (model_id == MOCK_MODEL_ID) never consume
+    the SCRUM-56 retry budget, so two mock failures can't cap a transaction
+    before a live run tries it -- while live failures still cap as before."""
+
+    def test_mock_failures_do_not_cap_a_live_attempt(
+        self, monkeypatch, caplog, scripted_llm
+    ):
+        caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
+        user_id, outlier_id = _seed_flagged_user()
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
+
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
+        compose_rationales.main()
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
+        compose_rationales.main()
+        caplog.clear()
+
+        as_live_model(monkeypatch)
+        live_model = scripted_llm(*_messages(GROUNDED_RATIONALE))
+        compose_rationales.main()
+
+        assert live_model.invocations == 1  # the live run still attempts it
+
+        db = TestingSessionLocal()
+        rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == outlier_id)
+            .order_by(AgentRationale.id)
+            .all()
+        )
+        db.close()
+        assert [(r.model_id, r.validation_passed) for r in rows] == [
+            (MOCK_MODEL_ID, False),
+            (MOCK_MODEL_ID, False),
+            (LIVE_MODEL_ID, True),
+        ]
+        assert "outcome=skipped_capped" not in caplog.text
+        assert f"attempt=1/{MAX_VALIDATION_ATTEMPTS}" in caplog.text
+
+    def test_live_failures_still_cap(self, monkeypatch, caplog, scripted_llm):
+        caplog.set_level(logging.INFO, logger="scripts.compose_rationales")
+        user_id, outlier_id = _seed_flagged_user()
+        monkeypatch.setattr(
+            sys, "argv", ["compose_rationales", "--user-id", str(user_id)]
+        )
+        as_live_model(monkeypatch)
+
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
+        compose_rationales.main()
+        scripted_llm(*_messages(UNGROUNDED_RATIONALE))
+        compose_rationales.main()
+        caplog.clear()
+
+        counting_model = scripted_llm()
+        compose_rationales.main()
+
+        assert counting_model.invocations == 0
+
+        db = TestingSessionLocal()
+        rows = (
+            db.query(AgentRationale)
+            .filter(AgentRationale.transaction_id == outlier_id)
+            .all()
+        )
+        db.close()
+        assert len(rows) == 2
+        assert all(r.model_id == LIVE_MODEL_ID for r in rows)
+        assert (
+            "run complete: passed=0 validation_failed=0 composition_error=0 "
+            "skipped_capped=1 skipped_already_passing=0"
+        ) in caplog.text
 
 
 class TestOneFailureDoesntStopTheRest:

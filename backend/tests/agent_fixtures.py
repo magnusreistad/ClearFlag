@@ -36,6 +36,7 @@ from app.rules.engine import (
     rule_names_by_transaction,
     rule_values_by_transaction,
 )
+from scripts import compose_rationales
 
 BASE_TIME = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
 HOME = {"latitude": 47.6062, "longitude": -122.3321, "location_label": "Seattle, WA"}
@@ -387,3 +388,15 @@ class ScriptedLLM:
     @property
     def remaining(self) -> int:
         return len(self._remaining)
+
+
+# SCRUM-91: mock-mode attempts (model_id == llm.MOCK_MODEL_ID) never count
+# toward the retry budget, so a test of the budget itself needs its rows
+# recorded under a live model_id. The suite can't run in live mode
+# (tests/no_live_guard.py), so this patches only the model_id
+# scripts.compose_rationales records -- the model is still ScriptedLLM's mock.
+LIVE_MODEL_ID = "claude-sonnet-5-5"
+
+
+def as_live_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(compose_rationales, "current_model_id", lambda: LIVE_MODEL_ID)
