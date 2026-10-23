@@ -47,8 +47,11 @@ Thumbs.db
 *.log
 logs/
 
-# --- Claude Code local config (not shared via git) ---
-.claude/
-
-# --- CLAUDE.md informational file for Claude Code (not shared via git) ---
-CLAUDE.md
+# --- Claude Code config (SCRUM-83) ---
+# CLAUDE.md, the shared settings.json and the skills are tracked; everything
+# else under .claude/ (notably settings.local.json, which is machine-specific
+# and may hold secrets) stays local. `.claude/*` rather than `.claude/`: git
+# can't re-include files inside a directory that is itself ignored.
+.claude/*
+!.claude/settings.json
+!.claude/skills/
