@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from app.database import SessionLocal
 from app.models import AgentRationale, Transaction, User
+from app.rules import new_merchant_risk
 from app.rules.engine import evaluate_all_rules, rule_names_by_transaction
 from scripts import seed_transactions
 from scripts.seed_transactions import SEED_USER_NAME, generate_dataset
@@ -21,12 +22,93 @@ def seed_dataset() -> list[Transaction]:
     return transactions
 
 
-def test_seed_produces_at_least_one_velocity_flag():
+def flagged_by(rule_name: str) -> list[Transaction]:
+    """The seed's transactions that `rule_name` flags. The per-rule guards
+    below compare these to an exact set, so a plant that stops flagging and
+    a baseline row that starts both fail."""
+    transactions = seed_dataset()
+    by_id = {t.id: t for t in transactions}
+    return [
+        by_id[h.transaction_id]
+        for h in evaluate_all_rules(transactions)
+        if h.rule_name == rule_name
+    ]
+
+
+def test_seed_velocity_flags_exactly_each_bursts_sixth_charge():
     """SCRUM-89: the planted bursts used to be spaced i*randint(3,8) minutes
     apart, which never put more than 5 transactions in one 10-minute window,
     so the demo had no velocity flag at all."""
-    hits = [h for h in evaluate_all_rules(seed_dataset()) if h.rule_name == "velocity"]
-    assert hits, "seed no longer trips velocity -- check generate_velocity_fraud"
+    assert sorted(t.merchant for t in flagged_by("velocity")) == [
+        "QuickPay Test Merchant 1-6",
+        "QuickPay Test Merchant 2-6",
+        "QuickPay Test Merchant 3-6",
+    ]
+
+
+def test_seed_geographic_anomaly_flags_exactly_the_far_away_plants():
+    """The three geographic plants plus SCRUM-65's Meridian (Manila); their
+    merchants are ordinary baseline ones, so they're told apart by place."""
+    assert sorted(t.location_label for t in flagged_by("geographic_anomaly")) == [
+        "Bangkok, Thailand",
+        "Lagos, Nigeria",
+        "Manila, Philippines",
+        "Moscow, Russia",
+    ]
+
+
+def test_seed_amount_deviation_flags_exactly_the_large_plants():
+    """The four amount plants (at merchants the baseline also uses, so keyed
+    by amount too) and every new-merchant, multi- and triple-rule plant."""
+    assert sorted((t.merchant, t.amount) for t in flagged_by("amount_deviation")) == [
+        ("AMC Theatres", Decimal("420.00")),
+        ("Aurora Fine Jewelers", Decimal("2150.00")),
+        ("CVS Pharmacy", Decimal("380.00")),
+        ("Chipotle Mexican Grill", Decimal("310.00")),
+        ("Meridian Duty-Free Traders", Decimal("3200.00")),
+        ("Nordic Home Furnishings", Decimal("780.00")),
+        ("Precision Optics Co.", Decimal("610.00")),
+        ("Riverside Wellness Spa", Decimal("340.00")),
+        ("Whole Foods Market", Decimal("540.00")),
+    ]
+
+
+def test_seed_new_merchant_risk_flags_exactly_the_new_merchant_plants():
+    """SCRUM-90: Nordic Home Furnishings never flagged on its old day 91,
+    after Aurora's $2150 first purchase had inflated its baseline."""
+    assert sorted(t.merchant for t in flagged_by("new_merchant_risk")) == [
+        "Aurora Fine Jewelers",
+        "Meridian Duty-Free Traders",
+        "Nordic Home Furnishings",
+        "Precision Optics Co.",
+        "Riverside Wellness Spa",
+    ]
+
+
+def test_seed_nordic_clears_the_new_merchant_threshold_with_margin():
+    """SCRUM-90: a plant that barely clears (SCRUM-89's velocity bursts) stops
+    flagging on the next unrelated seed change. Nordic's z-score is ~7.04;
+    hold it to at least twice the rule's threshold."""
+    transactions = seed_dataset()
+    [nordic] = [t for t in transactions if t.merchant == "Nordic Home Furnishings"]
+    [values] = [
+        h.values
+        for h in evaluate_all_rules(transactions)
+        if h.rule_name == "new_merchant_risk" and h.transaction_id == nordic.id
+    ]
+    z_score = (values["amount"] - values["typical_first_purchase_mean"]) / values[
+        "typical_first_purchase_stdev"
+    ]
+    assert z_score >= 2 * new_merchant_risk.DEFAULT_STD_DEV_THRESHOLD
+
+
+def test_seed_flag_totals():
+    """The seed's demo numbers (SCRUM-90): 15 flagged transactions, 21 rule
+    hits -- velocity 3, geographic anomaly 4, amount deviation 9, new
+    merchant 5."""
+    hits = evaluate_all_rules(seed_dataset())
+    assert len({h.transaction_id for h in hits}) == 15
+    assert len(hits) == 21
 
 
 def test_seed_triple_rule_plant_still_trips_its_three_rules():

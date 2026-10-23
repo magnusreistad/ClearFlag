@@ -4,7 +4,7 @@ Produces ~95 days of realistic, mostly-unremarkable spending for the single
 seeded user, with a handful of deliberately planted fraud scenarios mixed in
 (see PLANTED FRAUD SCENARIOS below) for the rules engine (app/rules) to
 flag. Every plant trips the rule it targets at the engine's current
-thresholds, except the one new-merchant plant its reason line says doesn't.
+thresholds.
 
 Idempotent: re-running clears this user's existing transactions first --
 with their flags, dispositions and agent rationales, which reference them -- so
@@ -272,8 +272,8 @@ def generate_baseline(user_id: int, start_date: datetime) -> list[Transaction]:
 # against the baseline distributions above, so the rules engine flags them.
 # Each generator returns (Transaction, reason) pairs so main() can print a
 # verification summary after inserting; each reason says what that row
-# actually trips (tests/test_seed_transactions.py guards the velocity and
-# SCRUM-65 triple-rule plants over the full seed).
+# actually trips (tests/test_seed_transactions.py guards, per rule, exactly
+# which plants flag over the full seed).
 
 
 # SCRUM-89: minutes after each cluster's start. Velocity (SCRUM-17/76) flags
@@ -397,19 +397,19 @@ def generate_new_merchant_fraud(
     first-purchase amount. These merchant names never appear in baseline
     data, so they're guaranteed first-time-for-this-user by construction.
 
-    Precision Optics and Riverside Wellness also trip amount deviation.
-    Nordic Home Furnishings trips nothing (SCRUM-89): it lands after the
-    multi-rule plant's $2150 first purchase, which inflates the stdev of
-    both its first-purchase history and its shopping category, leaving it
-    about 2.2 and 1.6 stdevs above those means against a threshold of 3.
+    All three also trip amount deviation. SCRUM-90: Nordic Home Furnishings
+    sits on day 62, between Riverside (55) and the multi-rule plant (66).
+    After that plant's $2150 first purchase (its old day 91) it inflated
+    both baselines' stdev and never flagged; before Riverside, its own $780
+    would push Riverside's barely-clearing first-purchase z-score under 3.
     """
     results = []
     plants = [
-        (22, "shopping", "Precision Optics Co.", Decimal("610.00"), True),
-        (55, "health", "Riverside Wellness Spa", Decimal("340.00"), True),
-        (91, "shopping", "Nordic Home Furnishings", Decimal("780.00"), False),
+        (22, "shopping", "Precision Optics Co.", Decimal("610.00")),
+        (55, "health", "Riverside Wellness Spa", Decimal("340.00")),
+        (62, "shopping", "Nordic Home Furnishings", Decimal("780.00")),
     ]
-    for day_offset, category, merchant, amount, trips in plants:
+    for day_offset, category, merchant, amount in plants:
         day = start_date + timedelta(days=day_offset)
         tx = make_transaction(
             user_id,
@@ -419,14 +419,11 @@ def generate_new_merchant_fraud(
             amount,
             jittered_home_location(),
         )
-        outcome = (
+        reason = (
+            f"new merchant: first-ever charge from {merchant!r} -- "
             "trips new merchant and amount deviation"
-            if trips
-            else "trips no rule (see docstring)"
         )
-        results.append(
-            (tx, f"new merchant: first-ever charge from {merchant!r} -- {outcome}")
-        )
+        results.append((tx, reason))
     return results
 
 
