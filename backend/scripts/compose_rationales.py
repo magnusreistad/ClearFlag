@@ -22,7 +22,10 @@ too, so an unlucky model that keeps producing borderline-ungrounded output
 doesn't get unlimited chances to slip past validation. Only validation
 failures consume that budget: an attempt that never produced text at all
 (composition_error -- a tool or model failure) doesn't count against it, and
-is always safe to retry on the next run.
+is always safe to retry on the next run. SCRUM-91: neither does a mock-mode
+attempt (model_id == MOCK_MODEL_ID) -- its canned [MOCK] text always fails
+validation, so counting it would cap a transaction before any live run ever
+tried it.
 
 Run with: python -m scripts.compose_rationales
 Scope to one user: python -m scripts.compose_rationales --user-id 2
@@ -42,7 +45,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.investigation_agent import graph as graph_module
 from app.investigation_agent.fingerprint import compute_fact_fingerprint
-from app.investigation_agent.llm import current_model_id
+from app.investigation_agent.llm import MOCK_MODEL_ID, current_model_id
 from app.investigation_agent.payload import build_payload
 from app.investigation_agent.prompts import PROMPT_VERSION
 from app.investigation_agent.state import InvestigationState, transaction_data_from_orm
@@ -116,9 +119,10 @@ def _collect_pending(
     - capped (SCRUM-56: MAX_VALIDATION_ATTEMPTS validation-failed rows
       already exist for (transaction_id, fact_fingerprint, PROMPT_VERSION,
       VALIDATOR_VERSION) -- a composition_error attempt never counts here,
-      and a row with validator_version IS NULL never matches VALIDATOR_VERSION
-      by exact-equality, so legacy rows written before that column existed
-      don't count either) -- filtered out here, BEFORE --limit is applied,
+      a mock-mode attempt (model_id == MOCK_MODEL_ID, SCRUM-91) never counts
+      either, and a row with validator_version IS NULL never matches
+      VALIDATOR_VERSION by exact-equality, so legacy rows written before
+      that column existed don't count) -- filtered out here, BEFORE --limit is applied,
       so a capped transaction never takes up a run slot that could have gone
       to a transaction still worth attempting;
     - pending -- everything else, oldest-transaction-id-first.
@@ -184,6 +188,7 @@ def _collect_pending(
                 AgentRationale.validator_version == VALIDATOR_VERSION,
                 AgentRationale.validation_passed.is_(False),
                 AgentRationale.composition_error.is_(None),
+                AgentRationale.model_id != MOCK_MODEL_ID,
             )
             .group_by(AgentRationale.transaction_id)
             .all()

@@ -225,6 +225,9 @@ VALIDATOR_VERSION = "v3"
 # ungrounded rationale through validation by chance. A composition_error
 # attempt (a tool or model failure, not a validation failure) never
 # consumes this budget -- see scripts.compose_rationales._collect_pending.
+# Neither does a mock-mode attempt (model_id == llm.MOCK_MODEL_ID, SCRUM-91):
+# only live attempts count, so mock runs can't cap a later live run. A live
+# model change does NOT reset the budget -- bump PROMPT_VERSION for that.
 # A PROMPT_VERSION or VALIDATOR_VERSION bump resets the budget for every
 # transaction, same as it resets the pass/fail cache itself.
 MAX_VALIDATION_ATTEMPTS = 2

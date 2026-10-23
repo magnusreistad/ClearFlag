@@ -29,6 +29,12 @@ from langchain_core.messages import AIMessage
 # principle, applied here to the model itself rather than tool evidence.
 MOCK_RESPONSE_PREFIX = "[MOCK]"
 
+# SCRUM-91. The model_id current_model_id() reports in mock mode, and so the
+# model_id recorded on every agent_rationales row a mock run writes --
+# scripts.compose_rationales excludes rows with this model_id from the
+# SCRUM-56 retry budget, so mock attempts never cap a later live run.
+MOCK_MODEL_ID = "mock"
+
 # Current Claude API model ID for Sonnet per docs.claude.com's models
 # overview (no version of langchain-anthropic ships a built-in default --
 # `model` is a required field -- so this is ours to pick and override via
@@ -52,8 +58,13 @@ def current_model_id() -> str:
     mode still gets a label here (the mode string itself), since this is only ever used for a
     trace's human-readable tag; get_chat_model() remains the sole place that actually raises on
     a bad config.
+
+    SCRUM-91: mock mode reports MOCK_MODEL_ID, which scripts.compose_rationales also relies on
+    to keep mock attempts out of the retry budget.
     """
     mode = os.getenv("INVESTIGATION_AGENT_LLM_MODE", "mock").strip().lower() or "mock"
+    if mode == "mock":
+        return MOCK_MODEL_ID
     if mode != "live":
         return mode
     return os.getenv("INVESTIGATION_AGENT_LLM_MODEL", DEFAULT_MODEL)

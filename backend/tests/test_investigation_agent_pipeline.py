@@ -12,6 +12,7 @@ from agent_fixtures import (
     FLAGGED_SCENARIOS,
     UNGROUNDED_TEXT,
     anthropic_error,
+    as_live_model,
     completion,
     grounded_text,
     seed_scenario,
@@ -163,6 +164,7 @@ def test_validation_failure_is_persisted_and_interim_is_served(
     monkeypatch, scripted_llm
 ):
     seeded = seed_scenario("geographic_anomaly")
+    as_live_model(monkeypatch)  # SCRUM-91: only live attempts use the budget
     scripted_llm(completion("ungrounded", seeded))
 
     assert _run_script(monkeypatch, seeded.user_id) == 0
@@ -183,6 +185,7 @@ def test_over_length_rationale_is_a_validation_failure_not_a_truncation(
     monkeypatch, scripted_llm
 ):
     seeded = seed_scenario("new_merchant_risk")
+    as_live_model(monkeypatch)  # SCRUM-91: only live attempts use the budget
     too_long = completion("too_long", seeded)
     scripted_llm(too_long)
 
@@ -203,6 +206,7 @@ def test_over_length_rationale_is_a_validation_failure_not_a_truncation(
 
 def test_fail_then_pass_on_the_second_attempt_is_served(monkeypatch, scripted_llm):
     seeded = seed_scenario("velocity")
+    as_live_model(monkeypatch)  # SCRUM-91: only live attempts use the budget
     others = len(seeded.flagged_ids) - 1
     # Oldest-first: the primary (last burst member) is composed last each run.
     scripted_llm(
@@ -234,6 +238,7 @@ def _patch_prompt_version(monkeypatch, version: str) -> None:
 
 def test_prompt_version_bump_resets_the_validation_budget(monkeypatch, scripted_llm):
     seeded = seed_scenario("amount_deviation")
+    as_live_model(monkeypatch)  # SCRUM-91: only live attempts use the budget
     for _ in range(MAX_VALIDATION_ATTEMPTS):
         scripted_llm(completion("ungrounded", seeded))
         _run_script(monkeypatch, seeded.user_id)
@@ -374,6 +379,7 @@ def test_model_error_records_class_and_status_without_using_the_budget(
     kind, expected_prefix, monkeypatch, scripted_llm
 ):
     seeded = seed_scenario("amount_deviation")
+    as_live_model(monkeypatch)  # SCRUM-91: only live attempts use the budget
     llm = scripted_llm(anthropic_error(kind))
 
     assert _run_script(monkeypatch, seeded.user_id) == 1

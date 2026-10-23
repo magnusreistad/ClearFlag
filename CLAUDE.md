@@ -6,7 +6,7 @@ Guidance for Claude Code sessions in this repository. Decisions and their ration
 
 - **Secrets**: never print `.env`, any secret value, or any file that may contain one (including `.claude/settings.local.json`). To show which database is targeted, print the host only — never the connection string.
 - **Destructive operations on shared data need their own explicit approval** each time, even mid-ticket: applying a migration to Neon, reseeding (`scripts.seed_transactions`), and live composition (`scripts.compose_rationales` with `INVESTIGATION_AGENT_LLM_MODE=live`). Approval for one does not cover another.
-- **Never run `scripts.compose_rationales` in mock mode against the dev database** (known bug, SCRUM-91). Mock is the default, so a bare run against dev counts.
+- **Don't run `scripts.compose_rationales` in mock mode against the dev database.** Mock attempts no longer consume the live retry budget (SCRUM-91), but each one appends a permanently failing `[MOCK]` row to append-only `agent_rationales`. Mock is the default, so a bare run against dev counts; use `--dry-run` to preview.
 
 ## Working conventions
 
@@ -55,7 +55,7 @@ The request path, in order:
 - Tool dispatch is deterministic ([SCRUM-51]): `plan_tool_calls` builds the `AIMessage` tool calls in code from the rules that fired; LangGraph's `ToolNode` + `tools_condition` execute them. **Not** `.bind_tools()` — the model never chooses tools. Graph: `plan_tool_calls → ToolNode → collect_evidence → compose_rationale → validate`.
 - Every attempt (pass or fail) appends one `agent_rationales` row; `rationale` stays NULL on failure, while `composed_text` keeps what the model wrote for audit.
 - On agent, tool or validation (guardrail) failure, the graph marks `rationale_source="interim"` and writes no servable rationale, so the feed keeps serving the interim formatter ([SCRUM-56]).
-- Retries ([SCRUM-56]): `MAX_VALIDATION_ATTEMPTS` caps **validation failures only**, per (transaction, fingerprint, `PROMPT_VERSION`, `VALIDATOR_VERSION`). Composition errors (tool/model failures) don't consume that budget. Separately, the SDK retries transport errors inside one model call (`INVESTIGATION_AGENT_LLM_MAX_RETRIES`).
+- Retries ([SCRUM-56]): `MAX_VALIDATION_ATTEMPTS` caps **validation failures only**, per (transaction, fingerprint, `PROMPT_VERSION`, `VALIDATOR_VERSION`), and counts only non-mock attempts: rows with `model_id = "mock"` never count (SCRUM-91). Composition errors (tool/model failures) don't consume that budget. Separately, the SDK retries transport errors inside one model call (`INVESTIGATION_AGENT_LLM_MAX_RETRIES`).
 - `INVESTIGATION_AGENT_LLM_MODE` is `mock` (default) or `live`; live refuses to run in CI. Bump `PROMPT_VERSION` / `VALIDATOR_VERSION` on any change that could alter output or pass/fail.
 
 ## Standing conventions
